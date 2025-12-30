@@ -52,7 +52,7 @@ bool RequestHandler::init(void)
         return false;
     }
 
-    std::string url = std::string("ipc:\\") + std::string(NNGIPC_DIR_PATH) + "\\" + m_ipcName;
+    std::string url = std::string("ipc://") + std::string(NNGIPC_DIR_PATH) + "/" + m_ipcName;
     if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_dial", nng_strerror(rv));
         return false;

@@ -232,10 +232,10 @@ bool ResponseHandler::start(void)
 {
     if (!m_init) return false;
 
-    std::string url = std::string("ipc:\\") + std::string(NNGIPC_DIR_PATH) + "\\" + m_ipcName;
+    std::string url = std::string("ipc://") + std::string(NNGIPC_DIR_PATH) + "/" + m_ipcName;
     int rv = 0;
     if ((rv = nng_listen(m_sock, url.c_str(), NULL, 0)) != 0) {
-        fprintf(stderr, "%s: %s\n", "nng_listen", nng_strerror(rv));
+        fprintf(stderr, "%s: %s url %s\n", "nng_listen", nng_strerror(rv), url.c_str());
         return false;
     }
 

@@ -30,6 +30,8 @@ int main(void)
 {
     std::shared_ptr<nngipc::ResponseHandler> res_handler = nngipc::ResponseHandler::create(
         "system_service.ipc", 4, request_callback);
+    if (!res_handler) return -1;
+    if (!res_handler->start()) return -2;
 
     while(1) {
         sleep(2);
