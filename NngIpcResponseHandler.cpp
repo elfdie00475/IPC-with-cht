@@ -219,10 +219,10 @@ bool ResponseHandler::init(void)
         return false;
     }
 
-	for (uint32_t i = 0; i < m_workerNum; i++) {
+    for (uint32_t i = 0; i < m_workerNum; i++) {
         Worker *worker = alloc_worker(m_sock, m_outputCb);
         if (worker) m_workers.push_back(worker);
-	}
+    }
 
     m_init = true;
     return true;
@@ -262,7 +262,7 @@ bool ResponseHandler::release(void)
         worker->ctx = NNG_CTX_INITIALIZER;
     }
 
-    nng_socket_close(m_sock);
+    nng_close(m_sock);
     m_sock = NNG_SOCKET_INITIALIZER;
 
     m_init = false;

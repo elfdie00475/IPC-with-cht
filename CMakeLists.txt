@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if (INCLUDE_OUTPUT_PATH)
 else ()
@@ -27,8 +28,14 @@ target_link_libraries(system_service nng_ipc_handler)
 add_executable(cht_client client.c)
 target_link_libraries(cht_client nng)
 
-add_library(nng_ipc_handler STATIC NngIpcResponseHandler.cpp)
+add_library(nng_ipc_handler SHARED NngIpcResponseHandler.cpp NngIpcRequestHandler.cpp)
 target_link_libraries(nng_ipc_handler nng)
+
+add_library(cht_ipc_client SHARED cht_ipc_client.cpp)
+target_link_libraries(cht_ipc_client nng_ipc_handler)
+
+add_executable(cht_p2pagent cht_p2pagent.c)
+target_link_libraries(cht_p2pagent cht_ipc_client)
 
 # 連接庫
 #target_link_libraries(ipc_service ${NANOMSG_LIBRARIES} ${OPENSSL_LIBRARIES})

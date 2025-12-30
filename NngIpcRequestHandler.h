@@ -25,13 +25,14 @@ public:
 
     bool send(const uint8_t *payload, size_t payload_len);
 
-    bool recv(const uint8_t **payload, size_t *payload_len);
+    bool recv(uint8_t **payload, size_t *payload_len);
 
 private:
     RequestHandler(const char *ipc_name);
 
     const std::string m_ipcName;
     nng_socket m_sock;
+    nng_msg *m_msg;
     bool m_init;
 
 }; // class RequestHandler
