@@ -98,6 +98,7 @@ static void process_worker(void *args)
         }
     }
 
+    printf("pWorker->state %d\n", pWorker->state);
     switch (pWorker->state) {
     case Worker::INIT:
         {

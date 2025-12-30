@@ -72,7 +72,7 @@ bool RequestHandler::send(const uint8_t *payload, size_t payload_len)
     }
 
     int rv = 0;
-    if ((rv = nng_msg_alloc(&m_msg, 0)) != 0) {
+    if ((rv = nng_msg_alloc(&m_msg, payload_len)) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_msg_alloc", nng_strerror(rv));
         return false;
     }
