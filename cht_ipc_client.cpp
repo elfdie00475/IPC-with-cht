@@ -9,17 +9,17 @@
 
 using namespace llt;
 
-static uint16_t g_u16Id = 0;
+static uint16_t g_u16MsgId = 0;
 static pthread_mutex_t g_IdMutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int cht_ipc_client_getId(void)
+static int cht_ipc_client_getMsgId(void)
 {
-    uint16_t u16TmpId = g_u16Id;
+    uint16_t u16TmpId = g_u16MsgId;
 
     pthread_mutex_lock(&g_IdMutex);
-    g_u16Id++;
-    if (g_u16Id == 0) g_u16Id++;
-    u16TmpId = g_u16Id;
+    g_u16MsgId++;
+    if (g_u16MsgId == 0) g_u16MsgId++;
+    u16TmpId = g_u16MsgId;
     pthread_mutex_unlock(&g_IdMutex);
 
     return u16TmpId;
@@ -30,17 +30,17 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
     if (!pReq || !pRep) return -1;
 
     int rc = 0;
-    stChtIpcHdr pIpcHdr;
+    stChtIpcMsg pIpcMsg;
     uint8_t *recv = NULL;
     bool res = false;
     do {
-        cht_ipc_hdr_init(&pIpcHdr, ((cht_ipc_client_getId() << 1) | 0), _GetCamStatusById);
-        pIpcHdr.u32PayloadSize = sizeof(stCamStatusByIdReq);
+        cht_ipc_msg_init(&pIpcMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GetCamStatusById);
+        pIpcMsg.u32PayloadSize = sizeof(stCamStatusByIdReq);
 
         std::shared_ptr<nngipc::RequestHandler> res_handler = nngipc::RequestHandler::create(CHT_IPC_NAME);
         if (!res_handler) { rc = -2; break; }
 
-        res = res_handler->append((const uint8_t *)&pIpcHdr, sizeof(stChtIpcHdr));
+        res = res_handler->append((const uint8_t *)&pIpcMsg, sizeof(stChtIpcHdr));
         if (!res) { rc = -3; break; }
         res = res_handler->append((const uint8_t *)pReq, sizeof(stCamStatusByIdReq));
         if (!res) { rc = -3; break; }
@@ -49,25 +49,28 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
 
         size_t recv_size = 0;
         res = res_handler->recv(&recv, &recv_size);
+
+        // check res and header;
         if (!res || !recv || 
-            recv_size != sizeof(stChtIpcHdr) + sizeof(stCamStatusByIdRep)) { 
+            recv_size != (sizeof(stChtIpcHdr) + sizeof(stCamStatusByIdRep))) { 
             rc = -5; break;
         }
-        uint32_t tmpFourCC = *((uint32_t *)recv);
-        if (cht_ipc_hdr_checkFourCC(tmpFourCC) != 1) {
+
+        stChtIpcMsg *pIpcMsg = (stChtIpcMsg *)recv;
+        if (cht_ipc_hdr_checkFourCC(pIpcMsg->u32FourCC) != 1) {
             rc = -5; break;
         }
 
         uint8_t *pread = recv;
         size_t read_size = 0;
 
-        memcpy(&pIpcHdr, pread, sizeof(stChtIpcHdr));
+        memcpy(&pIpcMsg, pread, sizeof(stChtIpcHdr));
         pread += sizeof(stChtIpcHdr);
         read_size += sizeof(stChtIpcHdr);
-        printf("pIpcHdr u16CmdType %d %x %d\n", pIpcHdr.result, pIpcHdr.u16CmdType, pIpcHdr.u32PayloadSize);
-        if (pIpcHdr.result != 0 ||
-            pIpcHdr.u16CmdType != _GetCamStatusById ||
-            pIpcHdr.u32PayloadSize != sizeof(stCamStatusByIdRep)) { rc = -6; break; }
+        printf("pIpcMsg u16CmdType %d %x %d\n", pIpcMsg.result, pIpcMsg.u16CmdType, pIpcMsg.u32PayloadSize);
+        if (pIpcMsg.result != 0 ||
+            pIpcMsg.u16CmdType != _GetCamStatusById ||
+            pIpcMsg.u32PayloadSize != sizeof(stCamStatusByIdRep)) { rc = -6; break; }
 
         memcpy(pRep, pread, sizeof(stCamStatusByIdRep));
 
@@ -77,7 +80,7 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
         free(recv);
     }
 
-    cht_ipc_hdr_free(&pIpcHdr);
+    cht_ipc_msg_free(&pIpcMsg);
 
     return rc;
 }
