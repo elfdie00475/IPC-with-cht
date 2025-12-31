@@ -62,22 +62,34 @@ bool RequestHandler::init(void)
     return true;
 }
 
-bool RequestHandler::send(const uint8_t *payload, size_t payload_len)
+bool RequestHandler::append(const uint8_t *payload, size_t payload_len)
 {
     if (!payload || payload_len == 0) return false;
- 
-    if (m_msg) {
-        nng_msg_free(m_msg);
-        m_msg = NULL;
-    }
 
     int rv = 0;
-    if ((rv = nng_msg_alloc(&m_msg, payload_len)) != 0) {
-        fprintf(stderr, "%s: %s\n", "nng_msg_alloc", nng_strerror(rv));
+    if (!m_msg) {
+        if ((rv = nng_msg_alloc(&m_msg, 0)) != 0) {
+            fprintf(stderr, "%s: %s\n", "nng_msg_alloc", nng_strerror(rv));
+            return false;
+        }
+    }
+    if (!m_msg) return false;
+
+    if ((rv = nng_msg_append(m_msg, payload, payload_len)) != 0) {
+        fprintf(stderr, "%s: %s\n", "nng_msg_append", nng_strerror(rv));
+        nng_msg_free(m_msg);
+        m_msg = NULL;
         return false;
     }
-    memcpy(nng_msg_body(m_msg), payload, payload_len);
 
+    return true;
+}
+
+bool RequestHandler::send(void)
+{
+    if (!m_msg) return false;
+
+    int rv = 0;
 	if ((rv = nng_sendmsg(m_sock, m_msg, 0)) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_sendmsg", nng_strerror(rv));
         nng_msg_free(m_msg);
@@ -85,11 +97,16 @@ bool RequestHandler::send(const uint8_t *payload, size_t payload_len)
         return false;
 	}
 
+    m_msg = NULL;
+
     return true;
 }
 
 bool RequestHandler::recv(uint8_t **payload, size_t *payload_len)
 {
+    if (payload) *payload = NULL;
+    if (payload_len) *payload_len = 0;
+
     int rv = 0;
 	if ((rv = nng_recvmsg(m_sock, &m_msg, 0)) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_recvmsg", nng_strerror(rv));

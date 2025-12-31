@@ -1,5 +1,5 @@
-#ifndef __LLT_NNGIPC_IPCRESPONSEHANDLER_H__
-#define __LLT_NNGIPC_IPCRESPONSEHANDLER_H__
+#ifndef LLT_NNGIPC_IPCRESPONSEHANDLER_H
+#define LLT_NNGIPC_IPCRESPONSEHANDLER_H
 
 #include <memory>
 #include <string>
@@ -53,4 +53,4 @@ private:
 } // namespace nngipc
 } // namespace llt
 
-#endif /* __LLT_NNGIPC_IPCRESPONSEHANDLER_H__ */
+#endif /* LLT_NNGIPC_IPCRESPONSEHANDLER_H */

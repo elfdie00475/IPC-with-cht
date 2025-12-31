@@ -1,5 +1,5 @@
-#ifndef __LLT_NNGIPC_IPCREQUESTHANDLER_H__
-#define __LLT_NNGIPC_IPCREQUESTHANDLER_H__
+#ifndef LLT_NNGIPC_IPCREQUESTHANDLER_H
+#define LLT_NNGIPC_IPCREQUESTHANDLER_H
 
 #include <memory>
 #include <string>
@@ -23,7 +23,9 @@ public:
 
     bool release(void);
 
-    bool send(const uint8_t *payload, size_t payload_len);
+    bool append(const uint8_t *payload, size_t payload_len);
+
+    bool send(void);
 
     bool recv(uint8_t **payload, size_t *payload_len);
 
@@ -40,4 +42,4 @@ private:
 } // namespace nngipc
 } // namespace llt
 
-#endif /* __LLT_NNGIPC_IPCREQUESTHANDLER_H__ */
+#endif /* LLT_NNGIPC_IPCREQUESTHANDLER_H */

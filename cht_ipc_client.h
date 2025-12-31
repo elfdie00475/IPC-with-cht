@@ -1,7 +1,7 @@
-#ifndef __CHT_IPC_CLIENT_H__
-#define __CHT_IPC_CLIENT_H__
+#ifndef CHT_IPC_CLIENT_H
+#define CHT_IPC_CLIENT_H
 
-#define CHT_IPC_STRING_SIZE 256
+#include "cht_ipc_common.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,11 +16,25 @@ typedef struct cam_status_by_id_req_st {
 } stCamStatusByIdReq;
 
 typedef struct cam_status_by_id_rep_st {
+    int result;
     char tenantId[CHT_IPC_STRING_SIZE];
     char netNo[CHT_IPC_STRING_SIZE];
     int camSid;
     char camId[CHT_IPC_STRING_SIZE];
-    char userId[CHT_IPC_STRING_SIZE];
+    char firmwareVer[CHT_IPC_STRING_SIZE];
+    char latestVersion[CHT_IPC_STRING_SIZE];
+    int isMicrophone; // 1: open, 0: close;
+    int speakVolume; // 0~10
+    int imageQuality; // 0: low, 1: middle, 2: high
+    int activeStatus; // 0: not start, 1: started
+    char description[CHT_IPC_STRING_SIZE];
+    char name[CHT_IPC_STRING_SIZE];
+    char status[CHT_IPC_STRING_SIZE];
+    char externalStorageHealth[CHT_IPC_STRING_SIZE];
+    char externalStorageCapacity[CHT_IPC_STRING_SIZE];
+    char externalStorageAvailable[CHT_IPC_STRING_SIZE];
+    char wifiSsid[CHT_IPC_STRING_SIZE];
+    int wifiDbm;
 } stCamStatusByIdRep;
 
 extern int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep *pRep);
@@ -28,4 +42,4 @@ extern int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusB
 #ifdef __cplusplus
 }
 #endif
-#endif /* __CHT_IPC_CLIENT_H__ */
+#endif /* CHT_IPC_CLIENT_H */
