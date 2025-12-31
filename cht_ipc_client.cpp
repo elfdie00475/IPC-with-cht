@@ -30,18 +30,18 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
     if (!pReq) return -1;
 
     int rc = 0;
-    stChtIpcMsg pIpcRepMsg;
+    stChtIpcMsg pIpcReqMsg;
     uint8_t *recv = NULL;
     bool res = false;
     do {
-        cht_ipc_msg_init(&pIpcRepMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GetCamStatusById);
-        pIpcRepMsg.u32PayloadSize = sizeof(stCamStatusByIdReq);
+        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GetCamStatusById);
+        pIpcReqMsg.u32PayloadSize = sizeof(stCamStatusByIdReq);
 
         std::shared_ptr<nngipc::RequestHandler> rep_handler = 
                         nngipc::RequestHandler::create(CHT_IPC_NAME);
         if (!rep_handler) { rc = -2; break; }
 
-        res = rep_handler->append((const uint8_t *)&pIpcRepMsg, sizeof(stChtIpcHdr));
+        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
         if (!res) { rc = -3; break; }
         res = rep_handler->append((const uint8_t *)pReq, sizeof(stCamStatusByIdReq));
         if (!res) { rc = -3; break; }
