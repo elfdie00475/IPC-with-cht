@@ -25,9 +25,6 @@ link_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/lib")
 add_executable(system_service system_service.cpp)
 target_link_libraries(system_service nng_ipc_handler)
 
-add_executable(cht_client client.c)
-target_link_libraries(cht_client nng)
-
 add_library(nng_ipc_handler SHARED NngIpcResponseHandler.cpp NngIpcRequestHandler.cpp)
 target_link_libraries(nng_ipc_handler nng)
 
