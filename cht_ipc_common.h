@@ -18,6 +18,16 @@
 #endif // MAKEFOURCC
 #define CHT_IPC_FOURCC (MAKEFOURCC('C','H','T','1'))
 
+typedef struct cht_ipc_hdr_st {
+    uint32_t u32FourCC;
+    uint32_t u32HdrSize;
+    uint32_t u32PayloadSize;
+    uint16_t u16Headers[CHT_IPC_HEADER_SIZE];
+    // 0: cmd type
+    // 1: msg id
+    // 2: result
+} stChtIpcHdr;
+
 typedef struct cht_ipc_msg_st {
     uint32_t u32FourCC;
     uint32_t u32HdrSize;
