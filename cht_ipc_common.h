@@ -23,8 +23,8 @@ typedef struct cht_ipc_hdr_st {
     uint32_t u32HdrSize;
     uint32_t u32PayloadSize;
     uint16_t u16Headers[CHT_IPC_HEADER_SIZE];
-    // 0: cmd type
-    // 1: msg id
+    // 0: msg id
+    // 1: cmd type
     // 2: result
 } stChtIpcHdr;
 
@@ -33,8 +33,8 @@ typedef struct cht_ipc_msg_st {
     uint32_t u32HdrSize;
     uint32_t u32PayloadSize;
     uint16_t u16Headers[CHT_IPC_HEADER_SIZE];
-    // 0: cmd type
-    // 1: msg id
+    // 0: msg id
+    // 1: cmd type
     // 2: result
     uint8_t *pu8Payload;
 } stChtIpcMsg;
@@ -46,8 +46,8 @@ extern "C" {
 static void cht_ipc_msg_init(stChtIpcMsg *m, uint16_t u16MsgId, uint16_t u16CmdType)
 {
     m->u32FourCC = CHT_IPC_FOURCC;
-    m->u16Headers[0] = u16CmdType; // 0: cmd type
-    m->u16Headers[1] = u16MsgId; // 1: msg id
+    m->u16Headers[0] = u16CmdType; // 0: msg id
+    m->u16Headers[1] = u16MsgId; // 1: cmd type
     m->u32HdrSize = 2;
     m->u32PayloadSize = 0;
     m->pu8Payload = NULL;
