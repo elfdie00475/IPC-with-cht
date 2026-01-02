@@ -29,13 +29,7 @@ typedef struct cht_ipc_hdr_st {
 } stChtIpcHdr;
 
 typedef struct cht_ipc_msg_st {
-    uint32_t u32FourCC;
-    uint32_t u32HdrSize;
-    uint32_t u32PayloadSize;
-    uint16_t u16Headers[CHT_IPC_HEADER_SIZE];
-    // 0: msg id
-    // 1: cmd type
-    // 2: result
+    stChtIpcHdr stHdr;
     uint8_t *pu8Payload;
 } stChtIpcMsg;
 
@@ -45,11 +39,11 @@ extern "C" {
 
 static void cht_ipc_msg_init(stChtIpcMsg *m, uint16_t u16MsgId, uint16_t u16CmdType)
 {
-    m->u32FourCC = CHT_IPC_FOURCC;
-    m->u16Headers[0] = u16CmdType; // 0: msg id
-    m->u16Headers[1] = u16MsgId; // 1: cmd type
-    m->u32HdrSize = 2;
-    m->u32PayloadSize = 0;
+    m->stHdr.u32FourCC = CHT_IPC_FOURCC;
+    m->stHdr.u16Headers[0] = u16MsgId; // 0: msg id
+    m->stHdr.u16Headers[1] = u16CmdType; // 1: cmd type
+    m->stHdr.u32HdrSize = 2;
+    m->stHdr.u32PayloadSize = 0;
     m->pu8Payload = NULL;
 }
 
@@ -57,9 +51,9 @@ static void cht_ipc_msg_free(stChtIpcMsg *m)
 {
     if (!m) return ;
 
-    m->u32FourCC = CHT_IPC_FOURCC;
-    m->u32HdrSize = 0;
-    m->u32PayloadSize = 0;
+    m->stHdr.u32FourCC = CHT_IPC_FOURCC;
+    m->stHdr.u32HdrSize = 0;
+    m->stHdr.u32PayloadSize = 0;
 }
 
 static int cht_ipc_msg_checkFourCC(uint32_t u32FourCC)

@@ -16,12 +16,13 @@ void request_callback(const uint8_t *req_payload, size_t req_len, uint8_t **res_
 
     if (req_len <= sizeof(stChtIpcHdr)) return ;
     uint32_t tmpFourCC = *((uint32_t *)req_payload);
-    if (cht_ipc_hdr_checkFourCC(tmpFourCC) != 1) return ;
+    if (cht_ipc_msg_checkFourCC(tmpFourCC) != 1) return ;
 
     stChtIpcHdr *pIpcHdr = (stChtIpcHdr *)req_payload;
-    printf("pIpcHdr u16CmdType %x %d\n", pIpcHdr->u16CmdType, pIpcHdr->u32PayloadSize);
+    uint16_t u16CmdType = pIpcHdr->u16Headers[1];
     uint32_t u32PayloadSize = pIpcHdr->u32PayloadSize;
-    if (pIpcHdr->u16CmdType == _GetCamStatusById && u32PayloadSize == sizeof(stCamStatusByIdReq)) {
+    printf("pIpcHdr u16CmdType %x %d\n", u16CmdType, u32PayloadSize);
+    if (u16CmdType == _GetCamStatusById && u32PayloadSize == sizeof(stCamStatusByIdReq)) {
         stCamStatusByIdReq *pReq = (stCamStatusByIdReq *)(req_payload + sizeof(stChtIpcHdr));
         printf("tenantId %s\n", pReq->tenantId);
         printf("netNo %s\n", pReq->netNo);
@@ -50,9 +51,10 @@ void request_callback(const uint8_t *req_payload, size_t req_len, uint8_t **res_
         snprintf(rep.wifiSsid, CHT_IPC_STRING_SIZE, "%s", "abdsavd");
         rep.wifiDbm = -32;
 
-        pIpcHdr->u16Id = (pIpcHdr->u16Id & 1);
+        pIpcHdr->u16Headers[0] = (pIpcHdr->u16Headers[0] & 1);
         pIpcHdr->u32PayloadSize = sizeof(stCamStatusByIdRep);
-        pIpcHdr->result = 0;
+        pIpcHdr->u16Headers[2] = 0;
+        pIpcHdr->u32HdrSize = 3;
 
         if (res_payload) {
             uint8_t *response = (uint8_t *)malloc(sizeof(stChtIpcHdr) + sizeof(stCamStatusByIdRep));

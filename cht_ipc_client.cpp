@@ -35,7 +35,7 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
     bool res = false;
     do {
         cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GetCamStatusById);
-        pIpcReqMsg.u32PayloadSize = sizeof(stCamStatusByIdReq);
+        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stCamStatusByIdReq);
 
         std::shared_ptr<nngipc::RequestHandler> rep_handler = 
                         nngipc::RequestHandler::create(CHT_IPC_NAME);
@@ -50,13 +50,12 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
 
         size_t recv_size = 0;
         res = rep_handler->recv(&recv, &recv_size);
-
         // check res and header;
         if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) { 
             rc = -5; break;
         }
         stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_hdr_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
+        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
              pIpcRepHdr->u32HdrSize < 3) {
             rc = -5; break;
         }
@@ -78,7 +77,7 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
         free(recv);
     }
 
-    cht_ipc_msg_free(&pIpcRepMsg);
+    cht_ipc_msg_free(&pIpcReqMsg);
 
     return rc;
 }
