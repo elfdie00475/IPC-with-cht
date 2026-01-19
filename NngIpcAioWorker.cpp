@@ -225,8 +225,6 @@ void AioWorker::stop(void)
 
 bool AioWorker::subscribe(const std::string& subscribe_str)
 {
-    if (subscribe_str.empty()) return true;
-
     int rv = 0;
     if ((rv = nng_sub0_ctx_subscribe(m_ctx, subscribe_str.c_str(), subscribe_str.size())) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_setopt NNG_OPT_SUB_SUBSCRIBE", nng_strerror(rv));

@@ -72,7 +72,6 @@ bool SubscribeHandler::init(void)
 bool SubscribeHandler::subscribe(const std::string& subscribe_str)
 {
     if (!m_init) return false;
-    if (subscribe_str.empty()) return true;
 
     int rv = 0;
     if ((rv = nng_sub0_socket_subscribe(m_sock, subscribe_str.c_str(), subscribe_str.size())) != 0) {
