@@ -4,6 +4,7 @@
 #include <string>
 
 #include "NngIpcResponseHandler.h"
+#include "utils.h"
 
 #ifndef NNGIPC_DIR_PATH
 #define NNGIPC_DIR_PATH "/tmp/nngipc"
@@ -38,6 +39,7 @@ static Worker *alloc_worker(nng_socket sock, OutputCallback callback)
             break;
         }
 
+        pWorker->sock = sock;
         pWorker->cb = callback;
         pWorker->state = Worker::INIT;
         pWorker->stopping = false;
@@ -67,7 +69,7 @@ static void free_worker(Worker **ppWorker)
     if (pWorker) {
         nng_free(pWorker, sizeof(Worker));
     }
-    
+
     *ppWorker = NULL;
 }
 
@@ -209,9 +211,9 @@ ResponseHandler::~ResponseHandler()
 bool ResponseHandler::init(void)
 {
     // create ipc folder
-    std::string cmd = std::string("mkdir -p ") + NNGIPC_DIR_PATH;
-    system(cmd.c_str());
-    
+    const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
+    utils_runCmd(cmd);
+
     /*  Create the socket. */
     int rv = 0;
     if ((rv = nng_rep0_open(&m_sock)) != 0) {

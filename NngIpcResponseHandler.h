@@ -8,18 +8,26 @@
 #include <nng/nng.h>
 #include <nng/protocol/reqrep0/rep.h>
 
-namespace llt {
-namespace nngipc {
+#ifndef LLT_NNGIPC_IPCOUTPUTCALLBACK_DEFIEND
+#define LLT_NNGIPC_IPCOUTPUTCALLBACK_DEFIEND
+namespace llt::nngipc {
 
 typedef void (*OutputCallback) (const uint8_t *, size_t, uint8_t **, size_t *);
 
 struct Worker {
     enum { INIT, RECV, SEND, ERROR } state;
+    nng_socket sock;
     nng_aio *aio;
     nng_ctx ctx;
     OutputCallback cb;
     bool stopping;
 };
+
+} //namespace llt::nngipc
+#endif // LLT_NNGIPC_IPCOUTPUTCALLBACK_DEFIEND
+
+namespace llt {
+namespace nngipc {
 
 class ResponseHandler
 {

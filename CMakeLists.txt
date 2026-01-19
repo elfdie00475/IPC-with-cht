@@ -13,7 +13,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if (INCLUDE_OUTPUT_PATH)
 else ()
-set(INCLUDE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/include CACHE PATH "for install install file path")
+set(INCLUDE_OUTPUT_PATH ${CMAKE_INSTALL_PREFIX}/include CACHE PATH "for install install file path")
 endif ()
 
 include_directories(${INCLUDE_OUTPUT_PATH})
@@ -21,20 +21,32 @@ include_directories(${INCLUDE_OUTPUT_PATH})
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/include")
 link_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/lib")
 
-# 添加可執行文件
-add_executable(system_service system_service.cpp)
-target_link_libraries(system_service nng_ipc_handler)
-
-add_library(nng_ipc_handler SHARED NngIpcResponseHandler.cpp NngIpcRequestHandler.cpp)
+add_library(nng_ipc_handler SHARED
+    NngIpcResponseHandler.cpp
+    NngIpcRequestHandler.cpp
+    NngIpcPublishHandler.cpp
+    NngIpcSubscribeHandler.cpp
+    NngIpcAioWorker.cpp
+    utils.cpp
+)
 target_link_libraries(nng_ipc_handler nng)
 
-add_library(cht_ipc_client SHARED cht_ipc_client.cpp)
-target_link_libraries(cht_ipc_client nng_ipc_handler)
+add_subdirectory("demo/pubsub_forwarder")
+add_subdirectory("implement/cht_p2pagent")
+add_subdirectory("implement/test_pubsub")
 
-add_executable(cht_p2pagent cht_p2pagent.c)
-target_link_libraries(cht_p2pagent cht_ipc_client)
+install(TARGETS nng_ipc_handler
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+    INCLUDES DESTINATION include
+)
 
-# 連接庫
-#target_link_libraries(ipc_service ${NANOMSG_LIBRARIES} ${OPENSSL_LIBRARIES})
-#target_link_libraries(ipc_client ${NANOMSG_LIBRARIES} ${OPENSSL_LIBRARIES})
-#target_link_libraries(security ${OPENSSL_LIBRARIES})
+if (INCLUDE_OUTPUT_PATH)
+file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}")
+configure_file(NngIpcPublishHandler.h ${INCLUDE_OUTPUT_PATH}/NngIpcPublishHandler.h COPYONLY)
+configure_file(NngIpcRequestHandler.h ${INCLUDE_OUTPUT_PATH}/NngIpcRequestHandler.h COPYONLY)
+configure_file(NngIpcResponseHandler.h ${INCLUDE_OUTPUT_PATH}/NngIpcResponseHandler.h COPYONLY)
+configure_file(NngIpcSubscribeHandler.h ${INCLUDE_OUTPUT_PATH}/NngIpcSubscribeHandler.h COPYONLY)
+endif ()
+

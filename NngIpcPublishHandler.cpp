@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include "NngIpcRequestHandler.h"
+#include "NngIpcPublishHandler.h"
 #include "utils.h"
 
 #ifndef NNGIPC_DIR_PATH
@@ -13,13 +13,13 @@
 namespace llt {
 namespace nngipc {
 
-std::shared_ptr<RequestHandler> RequestHandler::create(const char *ipc_name)
+std::shared_ptr<PublishHandler> PublishHandler::create(const char *ipc_name, bool proxyMode)
 {
     if (!ipc_name || strlen(ipc_name) == 0) {
         return nullptr;
     }
 
-    const auto& handler = std::shared_ptr<RequestHandler>(new RequestHandler(ipc_name));
+    const auto& handler = std::shared_ptr<PublishHandler>(new PublishHandler(ipc_name, proxyMode));
     if (!handler) {
         return nullptr;
     }
@@ -31,20 +31,21 @@ std::shared_ptr<RequestHandler> RequestHandler::create(const char *ipc_name)
     return handler;
 }
 
-RequestHandler::RequestHandler(const char *ipc_name)
+PublishHandler::PublishHandler(const char *ipc_name, bool proxyMode)
 : m_ipcName{std::string(ipc_name)},
   m_msg{NULL},
-  m_init{false}
+  m_init{false},
+  m_proxyMode{proxyMode}
 {
     m_sock.id = 0;
 }
 
-RequestHandler::~RequestHandler()
+PublishHandler::~PublishHandler()
 {
     release();
 }
 
-bool RequestHandler::init(void)
+bool PublishHandler::init(void)
 {
     // create ipc folder
     const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
@@ -52,22 +53,35 @@ bool RequestHandler::init(void)
 
     /*  Create the socket. */
     int rv = 0;
-    if ((rv = nng_req0_open(&m_sock)) != 0) {
-        fprintf(stderr, "%s: %s\n", "nng_req0_open", nng_strerror(rv));
+    if ((rv = nng_pub0_open(&m_sock)) != 0) {
+        fprintf(stderr, "%s: %s\n", "nng_pub0_open", nng_strerror(rv));
         return false;
     }
 
     std::string url = std::string("ipc://") + std::string(NNGIPC_DIR_PATH) + "/" + m_ipcName;
-    if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
-        fprintf(stderr, "%s: %s\n", "nng_dial", nng_strerror(rv));
-        return false;
+    url = "tcp://127.0.0.1:3327";
+    if (m_proxyMode)
+    {
+        printf("%s %d nng_dial\n", __func__, __LINE__);
+        if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
+            fprintf(stderr, "%s: %s\n", "nng_listen", nng_strerror(rv));
+            return false;
+        }
     }
+    else
+    {
+        if ((rv = nng_listen(m_sock, url.c_str(), NULL, 0)) != 0) {
+            fprintf(stderr, "%s: %s\n", "nng_listen", nng_strerror(rv));
+            return false;
+        }
+    }
+    printf("%s %d url %s\n", __func__, __LINE__, url.c_str());
 
     m_init = true;
     return true;
 }
 
-bool RequestHandler::append(const uint8_t *payload, size_t payload_len)
+bool PublishHandler::append(const uint8_t *payload, size_t payload_len)
 {
     if (!payload || payload_len == 0) return false;
 
@@ -90,7 +104,7 @@ bool RequestHandler::append(const uint8_t *payload, size_t payload_len)
     return true;
 }
 
-bool RequestHandler::send(void)
+bool PublishHandler::send(void)
 {
     if (!m_msg) return false;
 
@@ -107,34 +121,7 @@ bool RequestHandler::send(void)
     return true;
 }
 
-bool RequestHandler::recv(uint8_t **payload, size_t *payload_len)
-{
-    if (payload) *payload = NULL;
-    if (payload_len) *payload_len = 0;
-
-    int rv = 0;
-	if ((rv = nng_recvmsg(m_sock, &m_msg, 0)) != 0) {
-        fprintf(stderr, "%s: %s\n", "nng_recvmsg", nng_strerror(rv));
-        return false;
-	}
-
-    size_t msglen = nng_msg_len(m_msg);
-    uint8_t *pmsg = (uint8_t *)malloc(msglen);
-    if (pmsg) {
-        memcpy(pmsg, nng_msg_body(m_msg), msglen);
-        if (payload) *payload = pmsg;
-        if (payload_len) *payload_len = msglen;
-    }
-
-    if (m_msg) {
-        nng_msg_free(m_msg);
-        m_msg = NULL;
-    }
-
-    return true;
-}
-
-bool RequestHandler::release(void)
+bool PublishHandler::release(void)
 {
     if (m_msg) {
         nng_msg_free(m_msg);
