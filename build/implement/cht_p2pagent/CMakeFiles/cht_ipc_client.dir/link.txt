@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -shared -Wl,-soname,libcht_ipc_client.so -o libcht_ipc_client.so CMakeFiles/cht_ipc_client.dir/cht_ipc_client.cpp.o   -L/home/linliting/study/c_code/IPC-with-cht/out/lib  -Wl,-rpath,/home/linliting/study/c_code/IPC-with-cht/out/lib:/home/linliting/study/c_code/IPC-with-cht/build: ../../libnng_ipc_handler.so -lnng 

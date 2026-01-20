@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/system_service.dir/system_service.cpp.o -o system_service   -L/home/linliting/study/c_code/IPC-with-cht/out/lib  -Wl,-rpath,/home/linliting/study/c_code/IPC-with-cht/out/lib:/home/linliting/study/c_code/IPC-with-cht/build: ../../libnng_ipc_handler.so -lnng 

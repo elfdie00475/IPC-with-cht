@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/pubsub_forwarder.dir/pubsub_forwarder.c.o -o pubsub_forwarder   -L/home/linliting/study/c_code/IPC-with-cht/out/lib  -Wl,-rpath,/home/linliting/study/c_code/IPC-with-cht/out/lib: -lnng 
