@@ -2,6 +2,7 @@
 #define LLT_NNGIPC_IPCPUBLISHHANDLER_H
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,9 @@ public:
 
 private:
     PublishHandler(const char *ipc_name, bool proxyMode);
+
+private:
+    std::mutex m_mutex;
 
     const std::string m_ipcName;
     nng_socket m_sock;

@@ -2,6 +2,7 @@
 #define LLT_NNGIPC_IPCREQUESTHANDLER_H
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,9 @@ public:
 
 private:
     RequestHandler(const char *ipc_name);
+
+private:
+    std::mutex m_mutex;
 
     const std::string m_ipcName;
     nng_socket m_sock;

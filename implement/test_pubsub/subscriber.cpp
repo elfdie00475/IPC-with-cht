@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 #if 1
-#include "NngIpcSubscribeHandler.h"
+#include "nngipc.h"
 
 using namespace llt;
 
@@ -20,7 +20,7 @@ void subscribe_callback(const uint8_t *req_payload, size_t req_len, uint8_t **re
 int main(void)
 {
     std::shared_ptr<nngipc::SubscribeHandler> sub_handler =
-            nngipc::SubscribeHandler::create("test_pubsub.ipc", subscribe_callback);
+            nngipc::SubscribeHandler::create("test_pubsub.ipc", 1, subscribe_callback);
 printf("%s %d\n", __func__, __LINE__);
     if (!sub_handler) return -1;
 printf("%s %d\n", __func__, __LINE__);

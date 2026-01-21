@@ -51,6 +51,8 @@ bool PublishHandler::init(void)
     const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
     utils_runCmd(cmd);
 
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     /*  Create the socket. */
     int rv = 0;
     if ((rv = nng_pub0_open(&m_sock)) != 0) {
@@ -59,10 +61,8 @@ bool PublishHandler::init(void)
     }
 
     std::string url = std::string("ipc://") + std::string(NNGIPC_DIR_PATH) + "/" + m_ipcName;
-    url = "tcp://127.0.0.1:3327";
     if (m_proxyMode)
     {
-        printf("%s %d nng_dial\n", __func__, __LINE__);
         if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
             fprintf(stderr, "%s: %s\n", "nng_listen", nng_strerror(rv));
             return false;
@@ -75,7 +75,6 @@ bool PublishHandler::init(void)
             return false;
         }
     }
-    printf("%s %d url %s\n", __func__, __LINE__, url.c_str());
 
     m_init = true;
     return true;
@@ -84,6 +83,8 @@ bool PublishHandler::init(void)
 bool PublishHandler::append(const uint8_t *payload, size_t payload_len)
 {
     if (!payload || payload_len == 0) return false;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     int rv = 0;
     if (!m_msg) {
@@ -106,6 +107,8 @@ bool PublishHandler::append(const uint8_t *payload, size_t payload_len)
 
 bool PublishHandler::send(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (!m_msg) return false;
 
     int rv = 0;
@@ -123,6 +126,8 @@ bool PublishHandler::send(void)
 
 bool PublishHandler::release(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (m_msg) {
         nng_msg_free(m_msg);
         m_msg = NULL;

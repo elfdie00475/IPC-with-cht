@@ -45,6 +45,13 @@ install(TARGETS cht_p2pagent
     INCLUDES DESTINATION include
 )
 
+set(OUTPUT_HEADER
+    ${CMAKE_CURRENT_SOURCE_DIR}/cht_ipc_client.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cht_ipc_common.h
+)
+
+install(FILES ${OUTPUT_HEADER} DESTINATION include)
+
 if (INCLUDE_OUTPUT_PATH)
 file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}")
 configure_file("cht_ipc_client.h" ${INCLUDE_OUTPUT_PATH}/cht_ipc_client.h COPYONLY)

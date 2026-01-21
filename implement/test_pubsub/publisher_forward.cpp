@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "NngIpcPublishHandler.h"
+#include "nngipc.h"
 
 using namespace llt;
 

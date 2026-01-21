@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 #if 1
-#include "NngIpcPublishHandler.h"
+#include "nngipc.h"
 
 using namespace llt;
 

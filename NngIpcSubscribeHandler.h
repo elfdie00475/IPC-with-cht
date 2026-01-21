@@ -2,6 +2,7 @@
 #define LLT_NNGIPC_IPCSUBSCRIBEHANDLER_H
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,7 @@ class SubscribeHandler
 {
 public:
     static std::shared_ptr<SubscribeHandler> create(
-        const char *ipc_name, OutputCallback cb = nullptr);
+        const char *ipc_name, uint32_t worker_num = 1, OutputCallback cb = nullptr);
 
 public:
     ~SubscribeHandler();
@@ -35,7 +36,10 @@ public:
     bool unsubscribe(const std::string& subscribe_str);
 
 private:
-    SubscribeHandler(const char *ipc_name, OutputCallback cb);
+    SubscribeHandler(const char *ipc_name, uint32_t worker_num, OutputCallback cb);
+
+private:
+    std::mutex m_mutex;
 
     const std::string m_ipcName;
     nng_socket m_sock;
@@ -43,6 +47,7 @@ private:
     uint32_t m_workerNum;
     OutputCallback m_outputCB;
     std::vector<std::shared_ptr<AioWorker>> m_workers;
+    uint32_t m_subscribeIdx;
 
 }; // class SubscribeHandler
 

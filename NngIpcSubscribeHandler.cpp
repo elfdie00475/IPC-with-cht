@@ -15,13 +15,18 @@ namespace nngipc {
 
 static const uint32_t gc_maxWorkerNum = 1;
 
-std::shared_ptr<SubscribeHandler> SubscribeHandler::create(const char *ipc_name, OutputCallback cb)
+std::shared_ptr<SubscribeHandler> SubscribeHandler::create(
+    const char *ipc_name, uint32_t worker_num, OutputCallback cb)
 {
     if (!ipc_name || strlen(ipc_name) == 0) {
         return nullptr;
     }
 
-    const auto& handler = std::shared_ptr<SubscribeHandler>(new SubscribeHandler(ipc_name, cb));
+    if (worker_num == 0) worker_num = 1;
+    else if (worker_num > gc_maxWorkerNum) worker_num = gc_maxWorkerNum;
+
+    const auto& handler = std::shared_ptr<SubscribeHandler>(
+            new SubscribeHandler(ipc_name, worker_num, cb));
     if (!handler) {
         return nullptr;
     }
@@ -33,17 +38,21 @@ std::shared_ptr<SubscribeHandler> SubscribeHandler::create(const char *ipc_name,
     return handler;
 }
 
-SubscribeHandler::SubscribeHandler(const char *ipc_name, OutputCallback cb)
+SubscribeHandler::SubscribeHandler(
+    const char *ipc_name, uint32_t worker_num, OutputCallback cb)
 : m_ipcName{std::string(ipc_name)},
   m_init{false},
-  m_workerNum{gc_maxWorkerNum},
-  m_outputCB{cb}
+  m_workerNum{worker_num},
+  m_outputCB{cb},
+  m_subscribeIdx{0}
 {
     m_sock.id = 0;
+    m_workers.reserve(worker_num);
 }
 
 SubscribeHandler::~SubscribeHandler()
 {
+    stop();
     release();
 }
 
@@ -52,6 +61,8 @@ bool SubscribeHandler::init(void)
     // create ipc folder
     const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
     utils_runCmd(cmd);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     /*  Create the socket. */
     int rv = 0;
@@ -71,6 +82,8 @@ bool SubscribeHandler::init(void)
 
 bool SubscribeHandler::subscribe(const std::string& subscribe_str)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (!m_init) return false;
 
     int rv = 0;
@@ -79,17 +92,19 @@ bool SubscribeHandler::subscribe(const std::string& subscribe_str)
         return false;
     }
 
-    for (const auto& worker : m_workers) {
-        worker->subscribe(subscribe_str);
-    }
+
+    uint32_t idx = m_subscribeIdx;
+    m_workers[idx]->subscribe(subscribe_str);
+    m_subscribeIdx = (m_subscribeIdx+1) % m_workerNum;
 
     return true;
 }
 
 bool SubscribeHandler::unsubscribe(const std::string& subscribe_str)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (!m_init) return false;
-    if (subscribe_str.empty()) return true;
 
     int rv = 0;
     if ((rv = nng_sub0_socket_unsubscribe(m_sock, subscribe_str.c_str(), subscribe_str.size())) != 0) {
@@ -106,10 +121,11 @@ bool SubscribeHandler::unsubscribe(const std::string& subscribe_str)
 
 bool SubscribeHandler::start(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (!m_init) return false;
 
     std::string url = std::string("ipc://") + std::string(NNGIPC_DIR_PATH) + "/" + m_ipcName;
-    url = "tcp://127.0.0.1:3328";
     int rv = 0;
     if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
         fprintf(stderr, "%s: %s url %s\n", "nng_dial", nng_strerror(rv), url.c_str());
@@ -119,13 +135,14 @@ bool SubscribeHandler::start(void)
     for (const auto& worker : m_workers) {
         worker->start();
     }
-    printf("%s %d url %s\n", __func__, __LINE__, url.c_str());
 
     return true;
 }
 
 bool SubscribeHandler::stop(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     for (const auto& worker : m_workers) {
         worker->stop();
     }
@@ -135,6 +152,8 @@ bool SubscribeHandler::stop(void)
 
 bool SubscribeHandler::release(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     m_workers.clear();
 
     nng_close(m_sock);

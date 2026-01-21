@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "NngIpcSubscribeHandler.h"
+#include "nngipc.h"
 
 using namespace llt;
 
@@ -18,7 +18,7 @@ void subscribe_callback(const uint8_t *req_payload, size_t req_len, uint8_t **re
 int main(void)
 {
     std::shared_ptr<nngipc::SubscribeHandler> sub_handler =
-            nngipc::SubscribeHandler::create("pubsub_proxy_back.sock", subscribe_callback);
+            nngipc::SubscribeHandler::create("pubsub_proxy_back.sock", 1, subscribe_callback);
 
     if (!sub_handler) return -1;
     if (!sub_handler->subscribe("")) return -2;

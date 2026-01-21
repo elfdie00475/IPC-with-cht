@@ -50,6 +50,8 @@ bool RequestHandler::init(void)
     const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
     utils_runCmd(cmd);
 
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     /*  Create the socket. */
     int rv = 0;
     if ((rv = nng_req0_open(&m_sock)) != 0) {
@@ -70,6 +72,8 @@ bool RequestHandler::init(void)
 bool RequestHandler::append(const uint8_t *payload, size_t payload_len)
 {
     if (!payload || payload_len == 0) return false;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     int rv = 0;
     if (!m_msg) {
@@ -92,6 +96,8 @@ bool RequestHandler::append(const uint8_t *payload, size_t payload_len)
 
 bool RequestHandler::send(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (!m_msg) return false;
 
     int rv = 0;
@@ -111,6 +117,8 @@ bool RequestHandler::recv(uint8_t **payload, size_t *payload_len)
 {
     if (payload) *payload = NULL;
     if (payload_len) *payload_len = 0;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     int rv = 0;
 	if ((rv = nng_recvmsg(m_sock, &m_msg, 0)) != 0) {
@@ -136,6 +144,8 @@ bool RequestHandler::recv(uint8_t **payload, size_t *payload_len)
 
 bool RequestHandler::release(void)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (m_msg) {
         nng_msg_free(m_msg);
         m_msg = NULL;
