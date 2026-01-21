@@ -39,6 +39,7 @@ target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
 add_subdirectory("demo/pubsub_forwarder")
 add_subdirectory("implement/cht_p2pagent")
 add_subdirectory("implement/test_pubsub")
+add_subdirectory("implement/zwsystemInterface")
 
 install(TARGETS nngipc_handler
     ARCHIVE DESTINATION lib

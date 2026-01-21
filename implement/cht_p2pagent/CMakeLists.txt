@@ -18,10 +18,10 @@ include_directories(${INCLUDE_OUTPUT_PATH})
 
 # 添加可執行文件
 add_executable(system_service system_service.cpp)
-target_link_libraries(system_service PRIVATE nng_ipc_handler)
+target_link_libraries(system_service PRIVATE nngipc_handler)
 
 add_library(cht_ipc_client SHARED cht_ipc_client.cpp)
-target_link_libraries(cht_ipc_client PRIVATE nng_ipc_handler)
+target_link_libraries(cht_ipc_client PRIVATE nngipc_handler)
 
 add_executable(cht_p2pagent cht_p2pagent.c)
 target_link_libraries(cht_p2pagent PRIVATE cht_ipc_client)
