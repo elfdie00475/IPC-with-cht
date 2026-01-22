@@ -6,6 +6,7 @@
 #include <nngipc.h>
 
 #include "zwsystem_ipc_defined.h"
+#include "zwsystem_ipc_common.h"
 
 using namespace llt;
 

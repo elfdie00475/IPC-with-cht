@@ -14,18 +14,49 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #include_directories("${BRSTAGING_ROOT}/usr/include")
 #link_directories("${BRSTAGING_ROOT}/usr/lib")
 
+set(CLIENT_SOURCES
+    zwsystem_ipc_client.cpp
+)
+set(CLIENT_HEADERS
+    zwsystem_ipc_client.h
+    zwsystem_ipc_common.h
+)
+
+add_library(zwsystem_ipc_client SHARED ${CLIENT_SOURCES})
+target_link_libraries(zwsystem_ipc_client PUBLIC nngipc_handler)
+
+# client teset bin
+add_executable(zwsystem_ipc_client_test zwsystem_ipc_client_test.cpp)
+target_link_libraries(zwsystem_ipc_client_test PRIVATE zwsystem_ipc_client nngipc_handler)
+
 set(SERVER_SOURCES
-    zwsystem_ipc_server.cpp
+    zwsystem_ipc_service.cpp
 )
 set(SERVER_HEADERS
     zwsystem_ipc_server.h
     zwsystem_ipc_common.h
     zwsystem_ipc_defined.h
 )
-# client library ==> public C and C++ common
-#add_library(zwsystem_ipc_server SHARED ${SERVER_SOURCES})
-#target_link_libraries(zwsystem_ipc_server PUBLIC nngipc_handler)
 
 # service bin
-add_executable(zwsystem_ipc_service zwsystem_ipc_service.cpp)
+add_executable(zwsystem_ipc_service ${SERVER_SOURCES})
 target_link_libraries(zwsystem_ipc_service PRIVATE nngipc_handler)
+
+install(TARGETS zwsystem_ipc_service
+    RUNTIME DESTINATION bin
+)
+
+install(TARGETS zwsystem_ipc_client
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+    INCLUDES DESTINATION include
+)
+
+install(FILES ${CLIENT_HEADERS} DESTINATION include)
+
+if (INCLUDE_OUTPUT_PATH)
+file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}")
+configure_file("zwsystem_ipc_client.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_client.h COPYONLY)
+configure_file("zwsystem_ipc_common.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_common.h COPYONLY)
+endif ()

@@ -4,11 +4,12 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include "NngIpcRequestHandler.h"
 #include "zwsystem_ipc_client.h"
-#include "zwsystem_ipc_defined.h"
 
-using namespace llt;
+int main(void)
+{
+    return 0;
+}
 
 #if 0
 static uint16_t g_u16MsgId = 0;
