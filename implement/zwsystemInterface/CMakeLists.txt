@@ -60,3 +60,5 @@ file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}")
 configure_file("zwsystem_ipc_client.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_client.h COPYONLY)
 configure_file("zwsystem_ipc_common.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_common.h COPYONLY)
 endif ()
+
+add_subdirectory(test_ipc)

@@ -20,8 +20,10 @@ endif ()
 
 include_directories(${INCLUDE_OUTPUT_PATH})
 
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/include")
-link_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/lib")
+set(PREBUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prebuild")
+
+include_directories("${PREBUILD_DIR}/include")
+link_directories("${PREBUILD_DIR}/lib")
 
 add_library(nngipc_handler SHARED
     NngIpcResponseHandler.cpp
