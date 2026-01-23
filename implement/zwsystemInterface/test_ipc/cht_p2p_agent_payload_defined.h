@@ -6,6 +6,8 @@ extern "C"
 {
 #endif
 
+#define CHT_P2P_AGENT_CAMERA_TYPE "IPCAM"
+
 // ===== 基本回應結構 =====
 #define PAYLOAD_KEY_DATA "data" /**object*/               /**主要資料物件*/
 #define PAYLOAD_KEY_CODE "code" /**int*/                  /**回應代碼*/

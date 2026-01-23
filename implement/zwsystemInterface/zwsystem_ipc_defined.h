@@ -16,7 +16,7 @@ extern "C" {
 #define ZWSYSTEM_IPC_FOURCC (MAKEFOURCC('Z','W','S','Y'))
 
 typedef enum zwsystem_ipc_command_e {
-    _BindCameraReport = 0x0000,  /**綁定攝影機回報*/
+    _BindCameraReport = 0,      /**綁定攝影機回報*/
     _CameraRegister,            /**攝影機報到*/
     _CheckHiOSSstatus,          /**卡控回報*/
     _GetHamiCamInitialInfo,     /**Camera取得初始值*/
@@ -25,7 +25,7 @@ typedef enum zwsystem_ipc_command_e {
     _Recognition,               /**一辨事件回報(含上傳AWS-S3 檔案路徑)*/
     _StatusEvent,                /**設備異常、正常事件回報*/
 
-    _GetCamStatusById = 0x1000,     /**取得Camera即時硬體資訊(韌體版本+WiFi強度+SD卡狀態)*/
+    _GetCamStatusById,              /**取得Camera即時硬體資訊(韌體版本+WiFi強度+SD卡狀態)*/
     _DeleteCameraInfo,             /**解綁攝影機*/
     _SetTimeZone,                  /**設定攝影機時區*/
     _GetTimeZone,                  /**取得攝影機時區*/
@@ -78,6 +78,8 @@ typedef enum zwsystem_ipc_command_e {
     _GetVideoSourceConfigure,
     _GetVideoEncoderConfigure,
     _GetMetadataConfigure,
+
+    _ChangeWifi
 } eZwsystemIpcCmd;
 
 #define ZWSYSTEM_IPC_HEADER_SIZE 32

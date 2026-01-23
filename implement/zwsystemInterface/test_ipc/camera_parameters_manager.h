@@ -145,6 +145,7 @@ public:
     void setDeviceStatus(const std::string &status);
     void setCameraType(const std::string &type);
     void setModel(const std::string &model);
+    void setIsCheckHioss(bool value);
     void setIsCheckHioss(const std::string &value);
     void setBrand(const std::string &brand);
     void setTimeZone(const std::string &timezone);

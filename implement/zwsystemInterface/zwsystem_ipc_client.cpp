@@ -10,11 +10,10 @@
 
 using namespace llt;
 
-#if 0
 static uint16_t g_u16MsgId = 0;
 static pthread_mutex_t g_IdMutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int cht_ipc_client_getMsgId(void)
+static int ipc_client_getMsgId(void)
 {
     uint16_t u16TmpId = g_u16MsgId;
 
@@ -27,6 +26,127 @@ static int cht_ipc_client_getMsgId(void)
     return u16TmpId;
 }
 
+int zwsystem_ipc_bindCameraReport(stBindCameraReportReq stReq, stBindCameraReportRep *pRep)
+{
+    int rc = 0;
+    stZwsystemIpcMsg ipcReqMsg;
+    uint8_t *recv = NULL;
+    size_t recv_size = 0;
+
+    do {
+        eZwsystemIpcCmd ipc_cmd_id = _BindCameraReport;
+        size_t req_size = sizeof(stBindCameraReportReq);
+        size_t rep_size = sizeof(stBindCameraReportRep);
+        bool res = false;
+
+        zwsystem_ipc_msg_init(&ipcReqMsg, ((ipc_client_getMsgId() << 1) | 0), ipc_cmd_id);
+        ipcReqMsg.stHdr.u32PayloadSize = req_size;
+
+        std::shared_ptr<nngipc::RequestHandler> rep_handler =
+                        nngipc::RequestHandler::create(ZWSYSTEM_IPC_NAME);
+        if (!rep_handler) { rc = -2; break; }
+
+        res = rep_handler->append((const uint8_t *)&ipcReqMsg, sizeof(stZwsystemIpcHdr));
+        if (!res) { rc = -3; break; }
+        res = rep_handler->append((const uint8_t *)&stReq, req_size);
+        if (!res) { rc = -3; break; }
+        res = rep_handler->send();
+        if (!res) { rc = -4; break; }
+
+        res = rep_handler->recv(&recv, &recv_size);
+        // check res and header;
+        if (!res || !recv || recv_size < sizeof(stZwsystemIpcHdr)) {
+            rc = -5; break;
+        }
+        stZwsystemIpcHdr *pIpcRepHdr = (stZwsystemIpcHdr *)recv;
+        if ( zwsystem_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
+             pIpcRepHdr->u32HdrSize < 3 ) {
+            rc = -5; break;
+        }
+        int ipc_result = pIpcRepHdr->u16Headers[2];
+        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
+        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
+
+        if (ipc_result != 0 ||
+            u16CmdType != ipc_cmd_id ||
+            u32PayloadSize != rep_size) { rc = -6; break; }
+
+        if (pRep) {
+            stZwsystemIpcMsg *pIpcRepMsg = (stZwsystemIpcMsg *)recv;
+            memcpy(pRep, pIpcRepMsg->pu8Payload, rep_size);
+        }
+    } while (false);
+
+    if (recv) {
+        free(recv);
+    }
+
+    zwsystem_ipc_msg_free(&ipcReqMsg);
+
+    return rc;
+}
+
+int zwsystem_ipc_changeWifi(stChangeWifiReq stReq, stChangeWifiRep *pRep)
+{
+    int rc = 0;
+    stZwsystemIpcMsg ipcReqMsg;
+    uint8_t *recv = NULL;
+    size_t recv_size = 0;
+
+    do {
+        eZwsystemIpcCmd ipc_cmd_id = _ChangeWifi;
+        size_t req_size = sizeof(stChangeWifiReq);
+        size_t rep_size = sizeof(stChangeWifiRep);
+        bool res = false;
+
+        zwsystem_ipc_msg_init(&ipcReqMsg, ((ipc_client_getMsgId() << 1) | 0), ipc_cmd_id);
+        ipcReqMsg.stHdr.u32PayloadSize = req_size;
+
+        std::shared_ptr<nngipc::RequestHandler> rep_handler =
+                        nngipc::RequestHandler::create(ZWSYSTEM_IPC_NAME);
+        if (!rep_handler) { rc = -2; break; }
+
+        res = rep_handler->append((const uint8_t *)&ipcReqMsg, sizeof(stZwsystemIpcHdr));
+        if (!res) { rc = -3; break; }
+        res = rep_handler->append((const uint8_t *)&stReq, req_size);
+        if (!res) { rc = -3; break; }
+        res = rep_handler->send();
+        if (!res) { rc = -4; break; }
+
+        res = rep_handler->recv(&recv, &recv_size);
+        // check res and header;
+        if (!res || !recv || recv_size < sizeof(stZwsystemIpcHdr)) {
+            rc = -5; break;
+        }
+        stZwsystemIpcHdr *pIpcRepHdr = (stZwsystemIpcHdr *)recv;
+        if ( zwsystem_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
+             pIpcRepHdr->u32HdrSize < 3 ) {
+            rc = -5; break;
+        }
+        int ipc_result = pIpcRepHdr->u16Headers[2];
+        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
+        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
+
+        if (ipc_result != 0 ||
+            u16CmdType != ipc_cmd_id ||
+            u32PayloadSize != rep_size) { rc = -6; break; }
+
+        if (pRep) {
+            stZwsystemIpcMsg *pIpcRepMsg = (stZwsystemIpcMsg *)recv;
+            memcpy(pRep, pIpcRepMsg->pu8Payload, rep_size);
+        }
+    } while (false);
+
+    if (recv) {
+        free(recv);
+    }
+
+    zwsystem_ipc_msg_free(&ipcReqMsg);
+
+    return rc;
+}
+
+#if 0
 int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep *pRep)
 {
     if (!pReq) return -1;

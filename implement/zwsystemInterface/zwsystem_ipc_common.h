@@ -109,7 +109,13 @@ static inline eCameraStatus zwsystem_ipc_status_str2int(const char* s)
         (int)eStatus_Unknown);
 }
 
-typedef struct bind_camera_report_req_st {
+typedef struct default_st {
+    int code;
+} stDefault;
+
+typedef stDefault stBindCameraReportReq;
+
+typedef struct bind_camera_report_rep_st {
     char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char userId[ZWSYSTEM_IPC_STRING_SIZE];
     char name[ZWSYSTEM_IPC_STRING_SIZE];
@@ -129,8 +135,9 @@ typedef struct bind_camera_report_req_st {
     bool isCheckHioss;
     char brand[ZWSYSTEM_IPC_STRING_SIZE];
     char chtBarcode[ZWSYSTEM_IPC_STRING_SIZE];
-} stBindCameraReportReq;
+} stBindCameraReportRep;
 
+#if 0
 typedef struct bind_camera_report_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
@@ -141,6 +148,7 @@ typedef struct bind_camera_report_rep_st {
     char netNo[ZWSYSTEM_IPC_STRING_SIZE];
     char userId[ZWSYSTEM_IPC_STRING_SIZE];
 } stBindCameraReportRep;
+#endif
 
 typedef struct camera_register_req_st {
     char camId[ZWSYSTEM_IPC_STRING_SIZE];
@@ -776,10 +784,6 @@ typedef struct ptz_set_tracking_rep_st {
     ePtzTrackingMode val;
 } stPtzSetTrackingRep;
 
-typedef struct default_st {
-    int result;
-} stDefault;
-
 typedef stDefault stSetPtzHomeReq;
 
 typedef struct set_ptz_home_rep_st {
@@ -1092,6 +1096,17 @@ typedef struct get_media_all_config_rep_st {
     stGetMediaMetadataRep metadata[MEDIA_METADATA_MAX_SIZE];
 } stGetAllMediaConfigRep;
 
+typedef struct change_wifi_req_st {
+    char wifiSsid[ZWSYSTEM_IPC_STRING_SIZE];
+    char password[ZWSYSTEM_IPC_STRING_SIZE]; // base64
+} stChangeWifiReq;
+
+typedef struct change_wifi_rep_st {
+    int code;
+    char description[ZWSYSTEM_IPC_STRING_SIZE];
+    char wifiSsid[ZWSYSTEM_IPC_STRING_SIZE];
+    int wifiDbm;
+} stChangeWifiRep;
 
 #ifdef __cplusplus
 }

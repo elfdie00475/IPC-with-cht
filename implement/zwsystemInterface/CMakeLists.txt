@@ -61,4 +61,5 @@ configure_file("zwsystem_ipc_client.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_clien
 configure_file("zwsystem_ipc_common.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_common.h COPYONLY)
 endif ()
 
+add_subdirectory(simulation_cht_p2p_requester)
 add_subdirectory(test_ipc)

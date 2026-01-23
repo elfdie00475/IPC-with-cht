@@ -1121,6 +1121,11 @@ void CameraParametersManager::setModel(const std::string &model)
     setParameter("model", model);
 }
 
+void CameraParametersManager::setIsCheckHioss(bool value)
+{
+    setIsCheckHioss(value?"1":"0");
+}
+
 void CameraParametersManager::setIsCheckHioss(const std::string &value)
 {
     setParameter("isCheckHioss", value);
