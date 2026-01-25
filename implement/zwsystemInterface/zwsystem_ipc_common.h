@@ -111,11 +111,14 @@ static inline eCameraStatus zwsystem_ipc_status_str2int(const char* s)
 
 typedef struct default_st {
     int code;
+    char description[ZWSYSTEM_IPC_STRING_SIZE];
 } stDefault;
 
 typedef stDefault stBindCameraReportReq;
 
 typedef struct bind_camera_report_rep_st {
+    int code;
+    char description[ZWSYSTEM_IPC_STRING_SIZE];
     char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char userId[ZWSYSTEM_IPC_STRING_SIZE];
     char name[ZWSYSTEM_IPC_STRING_SIZE];
@@ -222,14 +225,14 @@ typedef struct hami_setting_st {
     bool nightMode;
     bool autoNightVision;
     bool statusIndicatorLight;
-    bool ifFlipUpDown;
+    bool isFlipUpDown;
     bool isHd;
     eFlickerMode flicker;
     eImageQualityMode imageQuality;
     bool isMicrophone;
     uint32_t microphoneSensitivity;
-    bool isSpeak;
-    uint32_t speakVolume;
+    bool isSpeaker;
+    uint32_t speakerVolume;
     uint32_t storageDay;
     bool scheduleOn;
     char scheduleSun[ZWSYSTEM_IPC_SCHEDULE_SIZE];
@@ -237,7 +240,7 @@ typedef struct hami_setting_st {
     char scheduleTue[ZWSYSTEM_IPC_SCHEDULE_SIZE];
     char scheduleWed[ZWSYSTEM_IPC_SCHEDULE_SIZE];
     char scheduleThu[ZWSYSTEM_IPC_SCHEDULE_SIZE];
-    char scheduleFir[ZWSYSTEM_IPC_SCHEDULE_SIZE];
+    char scheduleFri[ZWSYSTEM_IPC_SCHEDULE_SIZE];
     char scheduleSat[ZWSYSTEM_IPC_SCHEDULE_SIZE];
     uint32_t eventStorageDay;
     bool powerOn;
@@ -246,6 +249,7 @@ typedef struct hami_setting_st {
     bool ad;
     uint32_t power;
     ePtzStatus ptzStatus;
+    ePtzStatus ptzPetStatus;
     float ptzSpeed;
     uint32_t ptzTourStayTime;
     ePtzTrackingMode humanTracking;
@@ -282,7 +286,7 @@ typedef struct position_st
 } stPosition;
 
 typedef struct identification_feature_st {
-    int id;
+    uint32_t id;
     char name[ZWSYSTEM_IPC_STRING_SIZE];
     eVerifyLevel verifyLevel;
     uint8_t faceFeatures[ZWSYSTEM_FACE_FEATURES_SIZE];
@@ -379,6 +383,17 @@ typedef struct get_hamicam_initial_info_rep_st {
     stHamiAiSetting hamiAiSetting;
     stHamiSystemSetting hamiSystemSetting;
 } stGetHamiCamInitialInfoRep;
+
+typedef struct set_hamicam_initial_info_req_st {
+    int code;
+    char description[ZWSYSTEM_IPC_STRING_SIZE];
+    stHamiCamInfo hamiCamInfo;
+    stHamiSetting hamiSetting;
+    stHamiAiSetting hamiAiSetting;
+    stHamiSystemSetting hamiSystemSetting;
+} stSetHamiCamInitialInfoReq;
+
+typedef stDefault stSetHamiCamInitialInfoRep;
 
 typedef struct cam_status_by_id_req_st {
     char tenantId[ZWSYSTEM_IPC_STRING_SIZE];
@@ -643,6 +658,12 @@ typedef struct snapshot_rep_st {
     char filePath[ZWSYSTEM_IPC_STRING_SIZE];
 } stSnapshotRep;
 
+typedef struct snapshot_event_sub_st {
+    char eventId[ZWSYSTEM_IPC_STRING_SIZE];
+    char snapshotTime[ZWSYSTEM_IPC_STRING_SIZE];
+    char filePath[ZWSYSTEM_IPC_STRING_SIZE];
+} stSnapshotEventSub;
+
 typedef struct reboot_req_st {
     char camId[ZWSYSTEM_IPC_STRING_SIZE];
 } stRebootReq;
@@ -847,6 +868,14 @@ typedef struct record_event_rep_st {
     int result;
 } stRecordEventRep;
 
+typedef struct record_event_sub_st {
+    char eventId[ZWSYSTEM_IPC_STRING_SIZE];
+    char fromTime[ZWSYSTEM_IPC_STRING_SIZE];
+    char toTime[ZWSYSTEM_IPC_STRING_SIZE];
+    char filePath[ZWSYSTEM_IPC_STRING_SIZE];
+    char thumbnailfilePath[ZWSYSTEM_IPC_STRING_SIZE];
+} stRecordEventSub;
+
 typedef enum recognition_event_type {
     eRecognitionType_EED = 0,
     eRecognitionType_FR,
@@ -938,6 +967,18 @@ typedef struct recognition_event_rep_st {
     int result;
 } stRecognitionEventRep;
 
+typedef struct recognition_event_sub_st {
+    char eventId[ZWSYSTEM_IPC_STRING_SIZE];
+    char eventTime[ZWSYSTEM_IPC_STRING_SIZE];
+    eRecognitionType eventType;
+    eRecognitionEventClassType eventClass;
+    char videoFilePath[ZWSYSTEM_IPC_STRING_SIZE];
+    char snapshotFilePath[ZWSYSTEM_IPC_STRING_SIZE];
+    char audioFilePath[ZWSYSTEM_IPC_STRING_SIZE];
+    char coordinate[ZWSYSTEM_IPC_STRING_SIZE];
+    char fidResult[ZWSYSTEM_IPC_STRING_SIZE];
+} stRecognitionEventSub;
+
 typedef enum camera_status_event_type {
     eStatusEventType_Malfunction = 2,
     eStatuseventType_Normal = 4,
@@ -977,6 +1018,13 @@ typedef struct camera_status_event_rep_st {
     char description[ZWSYSTEM_IPC_STRING_SIZE];
     int result;
 } stCameraStatusEventRep;
+
+typedef struct camera_status_event_sub_st {
+    char eventId[ZWSYSTEM_IPC_STRING_SIZE];
+    eCameraStatusEventType statusType;
+    eCameraStatus status;
+    eExternalStorageHealth externalStorageHealth;
+} stCameraStatusEventSub;
 
 typedef enum stream_frame_type {
     eStreamFrameType_RTP = 0,

@@ -11,6 +11,12 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+
+#include <zwsystem_ipc_client.h>
 
 #include "cht_p2p_agent_c.h"
 #include "cht_p2p_camera_command_handler.h"
@@ -61,8 +67,28 @@ public:
 
     int getHamiCameraInitialInfo(void);
 
+    void addSystemEvent(eZwsystemSubSystemEventType eventType,
+            const uint8_t *data, size_t dataSize);
+
+private:
+    struct SystemEvent {
+        eZwsystemSubSystemEventType eventType;
+        std::vector<uint8_t> data;
+    };
+
+    void eventWorkerThread(void);
+    void processSystemEvent(const SystemEvent& event);
+    bool isEventWorkerStopping(void);
+
 private:
     bool m_initialized;
+
+    std::queue<SystemEvent> m_eventQueue;
+    std::mutex m_queueMutex;
+    std::condition_variable m_queueCV;
+    std::thread m_eventWorkerThread;
+    std::atomic<bool> m_eventWorkerStopping;
+
 };
 
 #endif // CHT_P2P_CAMERA_API_H

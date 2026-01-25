@@ -47,30 +47,21 @@ public:
     int cameraRegister(void);
     int checkHiOSSstatus(bool& hiOssStatus);
     int getHamiCameraInitialInfo(void);
+    int reportSnapshot(const uint8_t *data, size_t dataSize);
+    int reportRecord(const uint8_t *data, size_t dataSize);
+    int reportRecognition(const uint8_t *data, size_t dataSize);
+    int reportStatusEvent(const uint8_t *data, size_t dataSize);
 
     // 事件回報
-    bool reportSnapshot(const std::string &eventId, const std::string &snapshotTime, const std::string &filePath);
-    bool reportRecord(const std::string &eventId, const std::string &fromTime, const std::string &toTime,
-                      const std::string &filePath, const std::string &thumbnailfilePath);
-    bool reportRecognition(const std::string &eventId, const std::string &eventTime,
-                           const std::string &eventType, const std::string &eventClass,
-                           const std::string &videoFilePath, const std::string &snapshotFilePath,
-                           const std::string &audioFilePath, const std::string &coordinate,
-                           const std::string &resultAttributeJson);
-    bool reportStatusEvent(const std::string &eventId, int type, const std::string &camId,
-                           const std::string &statusOrHealth, bool isStatus);
+    
+
     // 參數管理器輔助函數
     void scheduledSync();
     bool getNetworkStatus();
     bool getStorageStatus();
 
-    // 串流相關
-    bool sendStreamData(const void *data, size_t dataSize, const std::string &requestId);
-
     // 回調設置
     //void setInitialInfoCallback(ChtP2PCameraAPI::InitialInfoCallback callback);
-    //void setControlCallback(ChtP2PCameraAPI::ControlCallback callback);
-    //void setAudioDataCallback(ChtP2PCameraAPI::AudioDataCallback callback);
 
 public:
     // CHT P2P Agent回調處理函數
@@ -95,12 +86,26 @@ private:
     bool getHamiCamInitialInfo(const std::string& camId, const std::string& chtBarcode,
             const std::string& tenantId, const std::string& netNo, const std::string& userId);
 
-    static void controlCallback(CHTP2P_ControlType controlType, void *controlHandle, const char *payload, void *userParam);
-    static void audioCallback(const char *data, size_t dataSize, const char *metadata, void *userParam);
+    bool reportSnapshot(const std::string& camId, const std::string& chtBarcode,
+            const std::string& eventId, const std::string& snapshotTime, const std::string& filePath);
+
+    bool reportRecord(const std::string& camId, const std::string& chtBarcode,
+            const std::string& eventId, 
+            const std::string& fromTime, const std::string& toTime,
+            const std::string& filePath, const std::string& thumbnailfilePath);
+
+    bool reportRecognition(const std::string& camId, const std::string& chtBarcode,
+            const std::string& eventId, const std::string& eventTime,
+            const std::string& eventType, const std::string& eventClass,
+            const std::string& videoFilePath, const std::string& snapshotFilePath, const std::string& audioFilePath, 
+            const std::string& coordinate, const std::string& fidResult);
+
+    bool reportStatusEvent(const std::string& camId, const std::string& chtBarcode,
+            const std::string& eventId, int type, 
+            const std::string &status, const std::string &storageHealth);
 
     // 命令處理幫助函數
     bool sendCommand(CHTP2P_CommandType commandType, const std::string &payload, std::string &response);
-    bool sendControlDone(CHTP2P_ControlType controlType, void *controlHandle, const std::string &payload);
 
     // 成員變量
     bool m_initialized;       // 初始化狀態
@@ -108,8 +113,6 @@ private:
 
     // 回調函數
     //ChtP2PCameraAPI::InitialInfoCallback m_initialInfoCallback;
-    //ChtP2PCameraAPI::ControlCallback m_controlCallback;
-    //ChtP2PCameraAPI::AudioDataCallback m_audioDataCallback;
 
     // 命令回應同步處理
     struct CommandContext

@@ -8,6 +8,14 @@ extern "C" {
 #endif
 
 #define ZWSYSTEM_IPC_NAME "zwsystem_service.ipc"
+#ifdef PUBSUB_USE_FORWARDING
+#define ZWSYSTEM_PUBLISH_NAME "zwsystem_proxy_front.ipc"
+#define ZWSYSTEM_SUBSCRIBE_NAME "zwsystem_proxy_back.ipc"
+#else
+#define ZWSYSTEM_PUBLISH_NAME "zwsystem_pubsub.ipc"
+#define ZWSYSTEM_SUBSCRIBE_NAME "zwsystem_pubsub.ipc"
+#endif
+
 #ifndef MAKEFOURCC
 #define MAKEFOURCC(ch0, ch1, ch2, ch3)  ((unsigned int)(unsigned char)(ch0) | \
     ((unsigned int)(unsigned char)(ch1) << 8) | ((unsigned int)(unsigned char)(ch2) << 16) | \
@@ -15,11 +23,19 @@ extern "C" {
 #endif // MAKEFOURCC
 #define ZWSYSTEM_IPC_FOURCC (MAKEFOURCC('Z','W','S','Y'))
 
+#define ZWSYSTEM_SUBSCRIBE_PREFIX_LEN 6
+#define ZWSYSTEM_SUBSCRIBE_SOURCE_SYSTEM_EVENT  "SYSEVE"
+#define ZWSYSTEM_SUBSCRIBE_SOURCE_SNAPSHOT      "SNAPSH"
+#define ZWSYSTEM_SUBSCRIBE_SOURCE_RECORD        "RECORD"
+#define ZWSYSTEM_SUBSCRIBE_SOURCE_RECOGNITION   "RECOGN"
+#define ZWSYSTEM_SUBSCRIBE_SOURCE_STATUS        "STATUS"
+
 typedef enum zwsystem_ipc_command_e {
     _BindCameraReport = 0,      /**綁定攝影機回報*/
     _CameraRegister,            /**攝影機報到*/
     _CheckHiOSSstatus,          /**卡控回報*/
     _GetHamiCamInitialInfo,     /**Camera取得初始值*/
+    _SetHamiCamInitialInfo,
     _Snapshot,                  /**截圖事件回報(定時)*/
     _Record,                    /**全時錄影事件回報(含上傳AWS-S3 檔案路徑)*/
     _Recognition,               /**一辨事件回報(含上傳AWS-S3 檔案路徑)*/
@@ -98,7 +114,6 @@ typedef struct zwsystem_ipc_msg_st {
     uint8_t *pu8Payload;
 } stZwsystemIpcMsg;
 
-
 static void zwsystem_ipc_msg_init(stZwsystemIpcMsg *m, uint16_t u16MsgId, uint16_t u16CmdType)
 {
     m->stHdr.u32FourCC = ZWSYSTEM_IPC_FOURCC;
@@ -121,6 +136,64 @@ static void zwsystem_ipc_msg_free(stZwsystemIpcMsg *m)
 static int zwsystem_ipc_msg_checkFourCC(uint32_t u32FourCC)
 {
     return ((u32FourCC == ZWSYSTEM_IPC_FOURCC)?1:0);
+}
+
+typedef struct zwsystem_sub_hdr_st {
+    char u8eventPrefix[ZWSYSTEM_SUBSCRIBE_PREFIX_LEN];
+} stZwsystemSubHdr;
+
+typedef struct zwsystem_sub_msg_st {
+    stZwsystemSubHdr stSubHdr;
+    stZwsystemIpcHdr stHdr;
+    uint8_t *pu8Payload;
+} stZwsystemSubMsg;
+
+static inline void zwsystem_sub_msg_init(stZwsystemSubMsg *m, 
+    const char *eventPrefix, uint16_t u16MsgId, uint16_t u16CmdType)
+{
+    if (!m || !eventPrefix) return;
+    
+    // 設置 Subscribe Prefix (用於 nng 的 prefix 匹配)
+    memcpy(m->stSubHdr.u8eventPrefix, eventPrefix, ZWSYSTEM_SUBSCRIBE_PREFIX_LEN);
+    
+    // 初始化 IPC Header
+    m->stHdr.u32FourCC = ZWSYSTEM_IPC_FOURCC;
+    m->stHdr.u16Headers[0] = u16MsgId;
+    m->stHdr.u16Headers[1] = u16CmdType;
+    m->stHdr.u32HdrSize = 2;
+    m->stHdr.u32PayloadSize = 0;
+    m->pu8Payload = NULL;
+}
+
+static inline void zwsystem_sub_msg_free(stZwsystemSubMsg *m)
+{
+    if (!m) return ;
+    m->stSubHdr.u8eventPrefix[0] = 0;
+
+    m->stHdr.u32FourCC = ZWSYSTEM_IPC_FOURCC;
+    m->stHdr.u32HdrSize = 0;
+    m->stHdr.u32PayloadSize = 0;
+}
+
+static inline const char* zwsystem_sub_msg_getEventPrefix(const stZwsystemSubMsg *m)
+{
+    if (!m) return NULL;
+
+    return m->stSubHdr.u8eventPrefix;
+}
+
+static inline const stZwsystemIpcHdr* zwsystem_sub_msg_getIpcHdr(const stZwsystemSubMsg *m)
+{
+    if (!m) return NULL;
+
+    return &m->stHdr;
+}
+
+static inline const void* zwsystem_sub_msg_getPayload(const stZwsystemSubMsg *m)
+{
+    if (!m) return NULL;
+
+    return m->pu8Payload;
 }
 
 #ifdef __cplusplus

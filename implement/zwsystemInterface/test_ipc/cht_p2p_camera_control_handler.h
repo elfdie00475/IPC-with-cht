@@ -17,7 +17,8 @@
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
 
-//#include "cht_p2p_agent_c.h"
+#include "cht_p2p_agent_c.h"
+
 #include "camera_parameters_manager.h"
 
 /**

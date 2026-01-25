@@ -1,0 +1,6 @@
+#ifndef CHT_P2P_CAMERA_STREAMING_HANDLER_H
+#define CHT_P2P_CAMERA_STREAMING_HANDLER_H
+
+#include "cht_p2p_agent_c.h"
+
+#endif // CHT_P2P_CAMERA_STREAMING_HANDLER_H

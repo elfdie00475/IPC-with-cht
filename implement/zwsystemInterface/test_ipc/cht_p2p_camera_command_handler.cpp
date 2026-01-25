@@ -16,6 +16,8 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <regex>
+#include <vector>
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -205,6 +207,14 @@ int ChtP2PCameraCommandHandler::bindCamera(const BindCameraConfig& config)
 static void AddString(rapidjson::Document& doc, const char* key, const std::string& val)
 {
     auto& alloc = doc.GetAllocator();
+    rapidjson::Value k(key, alloc);
+    rapidjson::Value v;
+    v.SetString(val.c_str(), static_cast<rapidjson::SizeType>(val.size()), alloc);
+    doc.AddMember(k, v, alloc);
+}
+
+static void AddString(rapidjson::Value& doc, const char* key, const std::string& val, rapidjson::Document::AllocatorType& alloc)
+{
     rapidjson::Value k(key, alloc);
     rapidjson::Value v;
     v.SetString(val.c_str(), static_cast<rapidjson::SizeType>(val.size()), alloc);
@@ -581,6 +591,38 @@ int ChtP2PCameraCommandHandler::getHamiCameraInitialInfo(void)
     return 0;
 }
 
+static int rewriteIntParam(int org, int minVal, int maxVal, bool hasDefault, int defaultVal)
+{
+    if (org < minVal) {
+        if (hasDefault) {
+            return defaultVal;
+        }
+        return minVal;
+    }
+    if (org > maxVal) {
+        if (hasDefault) {
+            return defaultVal;
+        }
+        return maxVal;
+    }
+    return org;
+}
+
+struct infoFaceFeaturesStruct {
+    int id;
+    std::string name;
+    int verifyLevel;
+    std::vector<uint8_t> faceFeatures;
+    std::string createTime;
+    std::string updateTime;
+} ;
+
+struct positionStruct
+{
+    float x;
+    float y;
+} ;
+
 bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId, const std::string& chtBarcode,
         const std::string& tenantId, const std::string& netNo, const std::string& userId)
 {
@@ -631,6 +673,10 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
             return false;
         }
 
+        // send to system service
+        stSetHamiCamInitialInfoRep stRep;
+        stSetHamiCamInitialInfoReq stReq;
+
         const rapidjson::Value& rep_dataObj = GetObjectMember(responseJson, PAYLOAD_KEY_DATA);
         const rapidjson::Value& rep_hamiCamInfoObj = GetObjectMember(rep_dataObj, PAYLOAD_KEY_HAMI_CAM_INFO);
         const rapidjson::Value& rep_hamiSettingObj = GetObjectMember(rep_dataObj, PAYLOAD_KEY_HAMI_SETTINGS);
@@ -651,10 +697,10 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
             return false;
         }
 
-        // check setting
+        // check hami setting
         int rep_nightMode = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_NIGHT_MODE);
         int rep_autoNightVision = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AUTO_NIGHT_VISION);
-        int rep_statusIndiccatorLight = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_STATUS_INDICATOR_LIGHT);
+        int rep_statusIndicatorLight = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_STATUS_INDICATOR_LIGHT);
         int rep_isFlipUpDown = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_IS_FLIP_UP_DOWN);
         int rep_isHd = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_IS_HD);
         int rep_flicker = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_FLICKER);
@@ -665,6 +711,21 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         int rep_speakerVol = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_SPEAK_VOLUME);
         int rep_storageDay = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_STORAGE_DAY);
         int rep_eventStorageDay = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_EVENT_STORAGE_DAY);
+        stReq.hamiSetting.nightMode = rewriteIntParam(rep_nightMode, 0, 1, false, -1);
+        stReq.hamiSetting.autoNightVision = rewriteIntParam(rep_autoNightVision, 0, 1, false, -1);
+        stReq.hamiSetting.statusIndicatorLight = rewriteIntParam(rep_statusIndicatorLight, 0, 1, false, -1);
+        stReq.hamiSetting.isFlipUpDown = rewriteIntParam(rep_isFlipUpDown, 0, 1, false, -1);
+        stReq.hamiSetting.isHd = rewriteIntParam(rep_isHd, 0, 1, false, -1);
+        stReq.hamiSetting.flicker = (eFlickerMode)rewriteIntParam(rep_flicker, 
+            (int)eFlicker_50Hz, (int)eFlicker_Outdoor, true, (int)eFlicker_60Hz);
+        stReq.hamiSetting.imageQuality = (eImageQualityMode)rewriteIntParam(rep_imageQuality, 
+            (int)eImageQuality_Low, (int)eImageQuality_High, true, (int)eImageQuality_Middle);
+        stReq.hamiSetting.isMicrophone = rewriteIntParam(rep_isMic, 0, 1, false, -1);
+        stReq.hamiSetting.microphoneSensitivity = rewriteIntParam(rep_micSen, 0, 10, true, 3);
+        stReq.hamiSetting.isSpeaker = rewriteIntParam(rep_isSpeaker, 0, 1, false, -1);
+        stReq.hamiSetting.speakerVolume = rewriteIntParam(rep_speakerVol, 0, 10, true, 3);
+        stReq.hamiSetting.storageDay = rewriteIntParam(rep_storageDay, 0, 30, true, 7);
+        stReq.hamiSetting.eventStorageDay = rewriteIntParam(rep_eventStorageDay, 0, 30, true, 15);
 
         int rep_powerOn = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_POWER_ON);
         int rep_alertOn = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_ALERT_ON);
@@ -677,6 +738,21 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         int rep_ptzTourStayTime = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_PTZ_TOUR_STAY_TIME);
         int rep_humanTracking = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_HUMAN_TRACKING);
         int rep_petTracking = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_PET_TRACKING);
+        stReq.hamiSetting.powerOn = rewriteIntParam(rep_powerOn, 0, 1, false, -1);
+        stReq.hamiSetting.alertOn = rewriteIntParam(rep_alertOn, 0, 1, false, -1);
+        stReq.hamiSetting.vmd = rewriteIntParam(rep_vmd, 0, 1, false, -1);
+        stReq.hamiSetting.ad = rewriteIntParam(rep_ad, 0, 1, false, -1);
+        stReq.hamiSetting.power = rewriteIntParam(rep_power, 0, 100, true, 50);
+        stReq.hamiSetting.ptzStatus = (ePtzStatus)rewriteIntParam(rep_ptzStatus, 
+            (int)ePtzStatus_None, (int)ePtzStatus_Stay, true, (int)ePtzStatus_None);
+        stReq.hamiSetting.ptzPetStatus = (ePtzStatus)rewriteIntParam(rep_ptzPetStatus, 
+            (int)ePtzStatus_None, (int)ePtzStatus_Stay, true, (int)ePtzStatus_None);
+        stReq.hamiSetting.ptzSpeed = (float)rewriteIntParam(rep_ptzSpeed, 0, 2, true, 1);
+        stReq.hamiSetting.ptzTourStayTime = rewriteIntParam(rep_ptzTourStayTime, 1, 5, true, 5);
+        stReq.hamiSetting.humanTracking = (ePtzTrackingMode)rewriteIntParam(rep_humanTracking, 
+            (int)ePtzTracking_Off, (int)ePtzTracking_Stay, true, (int)ePtzTracking_Off);
+        stReq.hamiSetting.petTracking = (ePtzTrackingMode)rewriteIntParam(rep_petTracking, 
+            (int)ePtzTracking_Off, (int)ePtzTracking_Stay, true, (int)ePtzTracking_Off);
 
         int rep_scheduleOn = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_SCHEDULE_ON);
         const std::string& rep_scheduleSun = GetStringMember(rep_hamiSettingObj, PAYLOAD_KEY_SCHEDULE_SUN);
@@ -687,14 +763,660 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         const std::string& rep_scheduleFri = GetStringMember(rep_hamiSettingObj, PAYLOAD_KEY_SCHEDULE_FRI);
         const std::string& rep_scheduleSat = GetStringMember(rep_hamiSettingObj, PAYLOAD_KEY_SCHEDULE_SAT);
 
+        stReq.hamiSetting.scheduleOn = rewriteIntParam(rep_scheduleOn, 0, 1, false, -1);
+        // check schedule string format
+        auto validateScheduleString = [](const std::string& scheduleStr) -> bool {
+            std::regex pattern("^([0-1][0-9]|2[0-3]):([0-5][0-9])-([0-1][0-9]|2[0-3]):([0-5][0-9])$");
+            return std::regex_match(scheduleStr, pattern);
+        };
+        if (!validateScheduleString(rep_scheduleSun) ||
+            !validateScheduleString(rep_scheduleMon) ||
+            !validateScheduleString(rep_scheduleTue) ||
+            !validateScheduleString(rep_scheduleWed) ||
+            !validateScheduleString(rep_scheduleThu) ||
+            !validateScheduleString(rep_scheduleFri) ||
+            !validateScheduleString(rep_scheduleSat)) {
+            throw std::runtime_error("Invalid schedule string format");
+        }
+        snprintf(stReq.hamiSetting.scheduleSun, sizeof(stReq.hamiSetting.scheduleSun), 
+                    "%s", rep_scheduleSun.c_str());
+        snprintf(stReq.hamiSetting.scheduleMon, sizeof(stReq.hamiSetting.scheduleMon), 
+                    "%s", rep_scheduleMon.c_str());
+        snprintf(stReq.hamiSetting.scheduleTue, sizeof(stReq.hamiSetting.scheduleTue), 
+                    "%s", rep_scheduleTue.c_str());
+        snprintf(stReq.hamiSetting.scheduleWed, sizeof(stReq.hamiSetting.scheduleWed), 
+                    "%s", rep_scheduleWed.c_str());
+        snprintf(stReq.hamiSetting.scheduleThu, sizeof(stReq.hamiSetting.scheduleThu), 
+                    "%s", rep_scheduleThu.c_str());
+        snprintf(stReq.hamiSetting.scheduleFri, sizeof(stReq.hamiSetting.scheduleFri), 
+                    "%s", rep_scheduleFri.c_str());
+        snprintf(stReq.hamiSetting.scheduleSat, sizeof(stReq.hamiSetting.scheduleSat), 
+                    "%s", rep_scheduleSat.c_str());
 
         // check aiSetting
+        int rep_vmdAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_VMD_ALERT);
+        int rep_humanAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_HUMAN_ALERT);
+        int rep_petAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_PET_ALERT);
+        int rep_adAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AD_ALERT);
+        int rep_fenceAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_FENCE_ALERT);
+        int rep_faceAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_FACE_ALERT);
+        int rep_fallAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_FALL_ALERT);
+        int rep_adBabyCryAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AD_BABY_CRY_ALERT);
+        int rep_adSpeechAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AD_SPEECH_ALERT);
+        int rep_adAlarmAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AD_ALARM_ALERT);
+        int rep_adDogAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AD_DOG_ALERT);
+        int rep_adCatAlert = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_AD_CAT_ALERT);
+        int rep_vmdSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_VMD_SEN);
+        int rep_adSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_SEN);
+        int rep_humanSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_HUMAN_SEN);
+        int rep_faceSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FACE_SEN);
+        int rep_fenceSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_SEN);
+        int rep_petSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_PET_SEN);
+        int rep_adBabyCrySen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_BABY_CRY_SEN);
+        int rep_adSpeechSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_SPEECH_SEN);
+        int rep_adAlarmSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_ALARM_SEN);
+        int rep_adDogSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_DOG_SEN);
+        int rep_adCatSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_CAT_SEN);
+        int rep_fallSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FALL_SEN);
+        int rep_fallTime = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FALL_TIME);    
+        stReq.hamiAiSetting.vmdAlert = rewriteIntParam(rep_vmdAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.humanAlert = rewriteIntParam(rep_humanAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.petAlert = rewriteIntParam(rep_petAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.adAlert = rewriteIntParam(rep_adAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.fenceAlert = rewriteIntParam(rep_fenceAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.faceAlert = rewriteIntParam(rep_faceAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.fallAlert = rewriteIntParam(rep_fallAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.adBabyCryAlert = rewriteIntParam(rep_adBabyCryAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.adSpeechAlert = rewriteIntParam(rep_adSpeechAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.adAlarmAlert = rewriteIntParam(rep_adAlarmAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.adDogAlert = rewriteIntParam(rep_adDogAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.adCatAlert = rewriteIntParam(rep_adCatAlert, 0, 1, false, -1);
+        stReq.hamiAiSetting.vmdSen = (eSenMode)rewriteIntParam(rep_vmdSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.adSen = (eSenMode)rewriteIntParam(rep_adSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.humanSen = (eSenMode)rewriteIntParam(rep_humanSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.faceSen = (eSenMode)rewriteIntParam(rep_faceSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.fenceSen = (eSenMode)rewriteIntParam(rep_fenceSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.petSen = (eSenMode)rewriteIntParam(rep_petSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.adBabyCrySen = (eSenMode)rewriteIntParam(rep_adBabyCrySen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.adSpeechSen = (eSenMode)rewriteIntParam(rep_adSpeechSen,
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.adAlarmSen = (eSenMode)rewriteIntParam(rep_adAlarmSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.adDogSen = (eSenMode)rewriteIntParam(rep_adDogSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.adCatSen = (eSenMode)rewriteIntParam(rep_adCatSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.fallSen = (eSenMode)rewriteIntParam(rep_fallSen, 
+            (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
+        stReq.hamiAiSetting.fallTime = rewriteIntParam(rep_fallTime, 1, 5, true, 3);
 
+        const rapidjson::Value& rep_identificationFeatures = GetObjectMember(rep_hamiAiSettingObj, PAYLOAD_KEY_IDENTIFICATION_FEATURES);
+    
+        if (rep_identificationFeatures.IsArray()) {
+            rapidjson::SizeType i = 0;
+            for (i = 0; i < rep_identificationFeatures.Size(); i++) {
+                if (i >= ZWSYSTEM_FACE_FEATURES_ARRAY_SIZE) {
+                    break;
+                }
+                const rapidjson::Value& featureObj = rep_identificationFeatures[i];
+                stIdentificationFeature *feature = &stReq.hamiAiSetting.features[i];
 
+                int rep_id = GetIntMember(featureObj, PAYLOAD_KEY_ID);
+                const std::string& rep_name = GetStringMember(featureObj, PAYLOAD_KEY_NAME);
+                int rep_verifyLevel = GetIntMember(featureObj, PAYLOAD_KEY_VERIFY_LEVEL);
+                rep_verifyLevel = rewriteIntParam(rep_verifyLevel, 1, 2, true, 2);
+        
+                const rapidjson::Value& rep_faceFeaturesBlob = GetObjectMember(featureObj, PAYLOAD_KEY_FACE_FEATURES);
+                if (rep_faceFeaturesBlob.IsString()) {
+                    const char *blobData = rep_faceFeaturesBlob.GetString();
+                    rapidjson::SizeType blobSize = rep_faceFeaturesBlob.GetStringLength();
+                    if (blobSize != ZWSYSTEM_FACE_FEATURES_SIZE) {
+                        throw std::runtime_error("Invalid face features blob size");
+                    }
+                    memcpy(feature->faceFeatures, blobData, blobSize);
+                }
+
+                const std::string& rep_createTime = GetStringMember(featureObj, PAYLOAD_KEY_CREATE_TIME);
+                const std::string& rep_updateTime = GetStringMember(featureObj, PAYLOAD_KEY_UPDATE_TIME);
+
+                feature->id = rep_id;
+                feature->verifyLevel = (eVerifyLevel)rewriteIntParam(rep_verifyLevel, 
+                    (int)eVerifyLevel_Low, (int)eVerifyLevel_High, true, (int)eVerifyLevel_High);
+                snprintf(feature->name, sizeof(feature->name), 
+                            "%s", rep_name.c_str());
+                snprintf(feature->createTime, sizeof(feature->createTime), 
+                            "%s", rep_createTime.c_str());
+                snprintf(feature->updateTime, sizeof(feature->updateTime), 
+                            "%s", rep_updateTime.c_str());
+            }
+        }
+
+        const rapidjson::Value& rep_fencePos1Obj = GetObjectMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_POS1);
+        positionStruct fencePos1;
+        fencePos1.x = static_cast<float>(GetIntMember(rep_fencePos1Obj, PAYLOAD_KEY_X));
+        fencePos1.y = static_cast<float>(GetIntMember(rep_fencePos1Obj, PAYLOAD_KEY_Y));
+        const rapidjson::Value& rep_fencePos2Obj = GetObjectMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_POS2);
+        positionStruct fencePos2;
+        fencePos2.x = static_cast<float>(GetIntMember(rep_fencePos2Obj, PAYLOAD_KEY_X));
+        fencePos2.y = static_cast<float>(GetIntMember(rep_fencePos2Obj, PAYLOAD_KEY_Y));
+        const rapidjson::Value& rep_fencePos3Obj = GetObjectMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_POS3);
+        positionStruct fencePos3;
+        fencePos3.x = static_cast<float>(GetIntMember(rep_fencePos3Obj, PAYLOAD_KEY_X));
+        fencePos3.y = static_cast<float>(GetIntMember(rep_fencePos3Obj, PAYLOAD_KEY_Y));
+        const rapidjson::Value& rep_fencePos4Obj = GetObjectMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_POS4);
+        positionStruct fencePos4;
+        fencePos4.x = static_cast<float>(GetIntMember(rep_fencePos4Obj, PAYLOAD_KEY_X));
+        fencePos4.y = static_cast<float>(GetIntMember(rep_fencePos4Obj, PAYLOAD_KEY_Y));
+        if ( (int)(fencePos1.x*100) < 0 || (int)(fencePos1.y*100) < 0 ||
+             (int)(fencePos2.x*100) < 0 || (int)(fencePos2.y*100) < 0 ||
+             (int)(fencePos3.x*100) < 0 || (int)(fencePos3.y*100) < 0 ||
+             (int)(fencePos4.x*100) < 0 || (int)(fencePos4.y*100) < 0 ) {
+            throw std::runtime_error("Invalid fence position values");
+        }
+        stReq.hamiAiSetting.fencePos[0].x = fencePos1.x;
+        stReq.hamiAiSetting.fencePos[0].y = fencePos1.y;
+        stReq.hamiAiSetting.fencePos[1].x = fencePos2.x;
+        stReq.hamiAiSetting.fencePos[1].y = fencePos2.y;
+        stReq.hamiAiSetting.fencePos[2].x = fencePos3.x;
+        stReq.hamiAiSetting.fencePos[2].y = fencePos3.y;
+        stReq.hamiAiSetting.fencePos[3].x = fencePos4.x;
+        stReq.hamiAiSetting.fencePos[3].y = fencePos4.y;
+
+        int rep_fenceDir = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_DIR);
+        stReq.hamiAiSetting.fenceDir = (eFenceDirection)rewriteIntParam(rep_fenceDir, 
+            (int)eFenceDir_Out2In, (int)eFenceDir_In2Out, false, -1);
+
+        stReq.hamiAiSetting.updateBit = eAiSettingUpdateMask_ALL;
+        stReq.hamiAiSetting.fencePosUpdateBit = eFencePosUpdateMask_ALL;
+    
+        // check systemSetting
+        const std::string& rep_otaDomainName = GetStringMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_OTA_DOMAIN_NAME);
+        int rep_otaQueryInterval = GetIntMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_OTA_QUERY_INTERVAL);
+        const std::string& rep_ntpServer = GetStringMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_NTP_SERVER);
+        const std::string& bucketName = GetStringMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_BUCKET_NAME);
+        stReq.hamiSystemSetting.otaQueryInterval = rep_otaQueryInterval;
+        snprintf(stReq.hamiSystemSetting.otaDomainName, sizeof(stReq.hamiSystemSetting.otaDomainName), 
+                        "%s", rep_otaDomainName.c_str());
+        snprintf(stReq.hamiSystemSetting.ntpServer, sizeof(stReq.hamiSystemSetting.ntpServer), 
+                        "%s", rep_ntpServer.c_str());
+        snprintf(stReq.hamiSystemSetting.bucketName, sizeof(stReq.hamiSystemSetting.bucketName), 
+                        "%s", bucketName.c_str());
+
+        int rc = zwsystem_ipc_setHamiCamInitialInfo(stReq, &stRep);
+        if (rc != 0 || stRep.code != 0) {
+            std::cerr << "zwsystem_ipc_setHamiCamInitialInfo failed, rc=" << rc
+                      << ", code=" << stRep.code << std::endl;
+            return false;
+        }
+        
         return true;
 
     } catch (const std::exception &e) {
         std::cerr << "getHamiCamInitialInfo error msg=" << e.what() << std::endl;
+        return false;
+    }
+
+    return false;
+}
+
+int ChtP2PCameraCommandHandler::reportSnapshot(const uint8_t *data, size_t dataSize)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return -1;
+    }
+
+    if (data == NULL || dataSize == 0 || dataSize != sizeof(stSnapshotEventSub))
+    {
+        std::cerr << "Invalid data!!!" << std::endl;
+        return -2;
+    }
+
+    stSnapshotEventSub *pSub = (stSnapshotEventSub *)data; 
+    std::string eventId(pSub->eventId);
+    std::string snapshotTime(pSub->snapshotTime);
+    std::string filePath(pSub->filePath);
+    if (eventId.empty() || snapshotTime.empty() || filePath.empty()) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    auto &paramsManager = CameraParametersManager::getInstance();
+    const std::string& camId = paramsManager.getCameraId();
+    const std::string& chtBarcode = paramsManager.getCHTBarcode();
+    
+    bool snapRes = reportSnapshot(camId, chtBarcode, eventId, snapshotTime, filePath);
+    if (!snapRes) {
+        std::cerr << "reportSnapshot failed!!!" << std::endl;
+        return -3;
+    }
+    
+    return 0;
+}
+
+bool ChtP2PCameraCommandHandler::reportSnapshot(const std::string& camId, const std::string& chtBarcode,
+        const std::string& eventId, const std::string& snapshotTime, const std::string& filePath)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return false;
+    }
+
+    auto require_non_empty = [](const std::string& s) { return !s.empty(); };
+    if (!require_non_empty(camId) || !require_non_empty(eventId) ||
+        !require_non_empty(snapshotTime) || !require_non_empty(filePath)) {
+        return false;
+    }
+
+    try {
+        // 構建JSON payload
+        rapidjson::Document document;
+        document.SetObject();
+        rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
+        AddString(document, PAYLOAD_KEY_CAMID, camId);
+        AddString(document, PAYLOAD_KEY_CHT_BARCODE, chtBarcode);
+        AddString(document, PAYLOAD_KEY_EVENT_ID, eventId);
+        AddString(document, PAYLOAD_KEY_SNAPSHOT_TIME, snapshotTime);
+        AddString(document, PAYLOAD_KEY_FILE_PATH, filePath);
+
+        // 轉換為JSON字符串
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        document.Accept(writer);
+
+        // 發送命令
+        std::string response;
+        if (!sendCommand(_Snapshot, buffer.GetString(), response)) {
+            throw std::runtime_error("sendCommand failed");
+        }
+
+        // check response
+        rapidjson::Document responseJson;
+        rapidjson::ParseResult parseResult = responseJson.Parse(response.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析回應JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            return false;
+        }
+
+        int rep_result = GetIntMember(responseJson, PAYLOAD_KEY_RESULT);
+        if (rep_result != 1) {
+            throw std::runtime_error(std::string("reportSnapshot response result != 1, result=") + std::to_string(rep_result));
+        }
+
+        return true;
+    } catch (const std::exception &e) {
+        std::cerr << "reportSnapshot error msg=" << e.what() << std::endl;
+        return false;
+    }
+
+    return false;
+}
+
+int ChtP2PCameraCommandHandler::reportRecord(const uint8_t *data, size_t dataSize)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return -1;
+    }
+
+    if (data == NULL || dataSize == 0 || dataSize != sizeof(stRecordEventSub))
+    {
+        std::cerr << "Invalid data!!!" << std::endl;
+        return -2;
+    }
+
+    stRecordEventSub *pSub = (stRecordEventSub *)data; 
+    std::string eventId(pSub->eventId);
+    std::string fromTime(pSub->fromTime);
+    std::string toTime(pSub->toTime);
+    std::string filePath(pSub->filePath);
+    std::string thumbnailfilePath(pSub->thumbnailfilePath);
+    if (eventId.empty() || fromTime.empty() || toTime.empty() ||
+        filePath.empty() || thumbnailfilePath.empty()) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    // check fromTime and toTime format is like "2024-09-19 00:00:30.000"
+
+    auto &paramsManager = CameraParametersManager::getInstance();
+    const std::string& camId = paramsManager.getCameraId();
+    const std::string& chtBarcode = paramsManager.getCHTBarcode();
+    
+    bool recRes = reportRecord(camId, chtBarcode, eventId, 
+            fromTime, toTime, filePath, thumbnailfilePath);
+    if (!recRes) {
+        std::cerr << "reportRecord failed!!!" << std::endl;
+        return -3;
+    }
+    
+    return 0;
+}
+
+bool ChtP2PCameraCommandHandler::reportRecord(const std::string& camId, const std::string& chtBarcode,
+        const std::string &eventId, 
+        const std::string &fromTime, const std::string &toTime,
+        const std::string &filePath, const std::string &thumbnailfilePath)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return false;
+    }
+
+    auto require_non_empty = [](const std::string& s) { return !s.empty(); };
+    if (!require_non_empty(camId) || !require_non_empty(eventId) ||
+        !require_non_empty(fromTime) || !require_non_empty(toTime) ||
+        !require_non_empty(filePath) || !require_non_empty(thumbnailfilePath)) {
+        return false;
+    }
+
+    // check fromTime and toTime format is like "2024-09-19 00:00:30.000"
+
+    try {
+        // 構建JSON payload - 符合客戶規格要求
+        rapidjson::Document document;
+        document.SetObject();
+        rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
+
+        AddString(document, PAYLOAD_KEY_CAMID, camId);
+        AddString(document, PAYLOAD_KEY_EVENT_ID, eventId);
+        AddString(document, PAYLOAD_KEY_FROM_TIME, fromTime);
+        AddString(document, PAYLOAD_KEY_TO_TIME, toTime);
+        AddString(document, PAYLOAD_KEY_FILE_PATH, filePath);
+        AddString(document, PAYLOAD_KEY_THUMBNAIL_FILE_PATH, thumbnailfilePath);
+
+        // 轉換為JSON字串
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        document.Accept(writer);
+
+        // 調試輸出JSON payload
+        std::cout << "[API-DEBUG] reportRecord 發送 JSON payload: " << buffer.GetString() << std::endl;
+
+        // 發送命令
+        std::string response;
+        if (!sendCommand(_Record, buffer.GetString(), response)) {
+            throw std::runtime_error("sendCommand failed");
+        }
+
+        // check response
+        rapidjson::Document responseJson;
+        rapidjson::ParseResult parseResult = responseJson.Parse(response.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析回應JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            return false;
+        }
+
+        int rep_result = GetIntMember(responseJson, PAYLOAD_KEY_RESULT);
+        if (rep_result != 1) {
+            throw std::runtime_error(std::string("reportRecord response result != 1, result=") + std::to_string(rep_result));
+        }
+
+        return true;
+
+    } catch (const std::exception &e) {
+        std::cerr << "reportRecord error msg=" << e.what() << std::endl;
+        return false;
+    }
+
+    return false;
+}
+
+int ChtP2PCameraCommandHandler::reportRecognition(const uint8_t *data, size_t dataSize)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return -1;
+    }
+
+    if (data == NULL || dataSize == 0 || dataSize != sizeof(stRecognitionEventSub))
+    {
+        std::cerr << "Invalid data!!!" << std::endl;
+        return -2;
+    }
+
+    stRecognitionEventSub *pSub = (stRecognitionEventSub *)data; 
+    std::string eventId(pSub->eventId);
+    std::string eventTime(pSub->eventTime);
+    eRecognitionType eventType = (eRecognitionType)pSub->eventType;
+    eRecognitionEventClassType eventClass = (eRecognitionEventClassType)pSub->eventClass;
+    std::string videoFilePath(pSub->videoFilePath);
+    std::string snapshotFilePath(pSub->snapshotFilePath);
+    std::string audioFilePath(pSub->audioFilePath);
+    std::string coordinate(pSub->coordinate);
+    std::string fidResult(pSub->fidResult);
+
+
+    if (eventId.empty() || eventTime.empty() || 
+        (videoFilePath.empty() && snapshotFilePath.empty() && audioFilePath.empty())) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    // check eventTime format is like "2024-09-19 00:00:30.000"
+    std::string eventTypeStr = zwsystem_ipc_recognitionType_int2str(eventType);
+    std::string eventClassStr = zwsystem_ipc_eventClass_int2str(eventClass);
+
+    auto &paramsManager = CameraParametersManager::getInstance();
+    const std::string& camId = paramsManager.getCameraId();
+    const std::string& chtBarcode = paramsManager.getCHTBarcode();
+    
+    bool recognRes = reportRecognition(camId, chtBarcode, eventId, 
+            eventTime, eventTypeStr, eventClassStr, 
+            videoFilePath, snapshotFilePath, audioFilePath, 
+            coordinate, fidResult);
+    if (!recognRes) { 
+        std::cerr << "reportRecognition failed!!!" << std::endl;
+        return -3;
+    }
+    
+    return 0;
+}
+
+bool ChtP2PCameraCommandHandler::reportRecognition(const std::string& camId, const std::string& chtBarcode,
+    const std::string& eventId, const std::string& eventTime,
+    const std::string& eventType, const std::string& eventClass,
+    const std::string& videoFilePath, const std::string& snapshotFilePath, const std::string& audioFilePath,
+    const std::string& coordinate, const std::string& fidResult)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return false;
+    }
+
+    auto require_non_empty = [](const std::string& s) { return !s.empty(); };
+    if (!require_non_empty(camId) || !require_non_empty(eventId) ||
+        !require_non_empty(eventTime) || !require_non_empty(eventType) || !require_non_empty(eventClass) || 
+        (!require_non_empty(videoFilePath) && !require_non_empty(snapshotFilePath) && !require_non_empty(audioFilePath))) {
+        return false;
+    }
+
+    // check eventTime format is like "2024-09-19 00:00:30.000"
+
+
+    try
+    {
+        // 構建JSON payload
+        rapidjson::Document document;
+        document.SetObject();
+        rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
+
+        AddString(document, PAYLOAD_KEY_CAMID, camId);
+        AddString(document, PAYLOAD_KEY_EVENT_ID, eventId);
+        AddString(document, PAYLOAD_KEY_EVENT_TIME, eventTime);
+        AddString(document, PAYLOAD_KEY_EVENT_TYPE, eventType);
+        AddString(document, PAYLOAD_KEY_EVENT_CLASS, eventClass);
+        AddString(document, PAYLOAD_KEY_VIDEO_FILE_PATH, videoFilePath.empty() ? "" : videoFilePath);
+        AddString(document, PAYLOAD_KEY_SNAPSHOT_FILE_PATH, snapshotFilePath.empty() ? "" : snapshotFilePath);
+        AddString(document, PAYLOAD_KEY_AUDIO_FILE_PATH, audioFilePath.empty() ? "" : audioFilePath);
+        AddString(document, PAYLOAD_KEY_COORDINATE, coordinate.empty() ? "" : coordinate);
+
+        rapidjson::Value resultAttribute(rapidjson::kObjectType);
+        AddString(resultAttribute, PAYLOAD_KEY_FID_RESULT, fidResult.empty() ? "" : fidResult, allocator);
+        document.AddMember(PAYLOAD_KEY_RESULT_ATTRIBUTE, resultAttribute, allocator);
+        
+        // 轉換為JSON字符串
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        document.Accept(writer);
+
+        // 發送命令
+        std::string response;
+        if (!sendCommand(_Recognition, buffer.GetString(), response))
+        {
+            throw std::runtime_error("sendCommand failed");
+        }
+
+        // check response
+        rapidjson::Document responseJson;
+        rapidjson::ParseResult parseResult = responseJson.Parse(response.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析回應JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            return false;
+        }
+
+        int rep_result = GetIntMember(responseJson, PAYLOAD_KEY_RESULT);
+        if (rep_result != 1)
+        {
+            throw std::runtime_error(std::string("reportRecognition response result != 1, result=") + std::to_string(rep_result));
+        }
+
+        return true;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "reportRecognition error msg=" << e.what() << std::endl;
+        return false;
+    }
+
+    return false;
+}
+
+int ChtP2PCameraCommandHandler::reportStatusEvent(const uint8_t *data, size_t dataSize)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return -1;
+    }
+
+    if (data == NULL || dataSize == 0 || dataSize != sizeof(stCameraStatusEventSub))
+    {
+        std::cerr << "Invalid data!!!" << std::endl;
+        return -2;
+    }
+
+    stCameraStatusEventSub *pSub = (stCameraStatusEventSub *)data; 
+    std::string eventId(pSub->eventId);
+    eCameraStatusEventType statusEventType = (eCameraStatusEventType)pSub->statusType;
+    eCameraStatus status = (eCameraStatus)pSub->status;
+    eExternalStorageHealth externalStorageHealth = (eExternalStorageHealth)pSub->externalStorageHealth;
+
+    if (eventId.empty()) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    //std::string eventTypeStr = zwsystem_ipc_statusEventType_int2str(statusEventType);
+    std::string statusStr = zwsystem_ipc_status_int2str(status);
+    std::string externalStorageHealthStr = zwsystem_ipc_health_int2str(externalStorageHealth);
+    
+    auto &paramsManager = CameraParametersManager::getInstance();
+    const std::string& camId = paramsManager.getCameraId();
+    const std::string& chtBarcode = paramsManager.getCHTBarcode();
+    
+    bool statusRes = reportStatusEvent(camId, chtBarcode, eventId, 
+            (int)statusEventType, statusStr, externalStorageHealthStr);
+    if (!statusRes) {
+        std::cerr << "reportStatusEvent failed!!!" << std::endl;
+        return -3;
+    }
+    
+    return 0;
+}
+
+
+bool ChtP2PCameraCommandHandler::reportStatusEvent(const std::string& camId, const std::string& chtBarcode,
+    const std::string& eventId, int type, const std::string &status, const std::string &storageHealth)
+{
+    if (!m_initialized)
+    {
+        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return false;
+    }
+
+    auto require_non_empty = [](const std::string& s) { return !s.empty(); };
+    if (!require_non_empty(camId) || !require_non_empty(eventId)) {
+        return false;
+    }
+
+    if (type != 2 || type != 4) {
+        std::cerr << "Invalid type value!!!" << std::endl;
+        return false;
+    }
+
+    try {
+        // 構建JSON payload
+        rapidjson::Document document;
+        document.SetObject();
+        rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
+
+        AddString(document, PAYLOAD_KEY_CAMID, camId);
+        AddString(document, PAYLOAD_KEY_CHT_BARCODE, chtBarcode);
+        AddString(document, PAYLOAD_KEY_EVENT_ID, eventId);
+        document.AddMember(PAYLOAD_KEY_TYPE, type, allocator);
+
+        rapidjson::Value recording(rapidjson::kObjectType);
+        AddString(recording, PAYLOAD_KEY_EVENT_ID, eventId, allocator);
+        AddString(recording, PAYLOAD_KEY_CAMID, camId, allocator);
+        AddString(recording, PAYLOAD_KEY_STATUS, status, allocator);
+        AddString(recording, PAYLOAD_KEY_EXTERNAL_STORAGE_HEALTH, storageHealth, allocator);
+        document.AddMember(PAYLOAD_KEY_RECORDING, recording, allocator);
+
+        // 轉換為JSON字符串
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        document.Accept(writer);
+
+        // 發送命令
+        std::string response;
+        if (!sendCommand(_StatusEvent, buffer.GetString(), response)) {
+            throw std::runtime_error("sendCommand failed");
+        }
+
+        // check response
+        rapidjson::Document responseJson;
+        rapidjson::ParseResult parseResult = responseJson.Parse(response.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析回應JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            return false;
+        }
+        
+        int rep_result = GetIntMember(responseJson, PAYLOAD_KEY_RESULT);
+        if (rep_result != 1) {
+            throw std::runtime_error(std::string("reportStatusEvent response result != 1, result=") + std::to_string(rep_result));
+        }
+
+        return true;
+    } catch (const std::exception &e) {
+        std::cerr << "reportStatusEvent error msg=" << e.what() << std::endl;
         return false;
     }
 
@@ -713,9 +1435,9 @@ void ChtP2PCameraCommandHandler::scheduledSync()
     auto &paramsManager = CameraParametersManager::getInstance();
 
     // 同步硬體參數
-    bool syncResult = paramsManager.syncWithHardware(false); // 只同步重要參數
+    //bool syncResult = paramsManager.syncWithHardware(false); // 只同步重要參數
 
-    if (syncResult)
+    //if (syncResult)
     {
         // 如果同步成功，保存到文件
         paramsManager.saveToFile();
@@ -731,7 +1453,7 @@ bool ChtP2PCameraCommandHandler::getNetworkStatus()
     if (paramsManager.isParameterStale("wifiSignalStrength", std::chrono::milliseconds(10000)))
     {
         // 同步硬體參數
-        paramsManager.syncWithHardware(false);
+        //paramsManager.syncWithHardware(false);
     }
 
     return true;
@@ -753,230 +1475,10 @@ bool ChtP2PCameraCommandHandler::getStorageStatus()
     return true;
 }
 
-bool ChtP2PCameraCommandHandler::reportSnapshot(const std::string &eventId, const std::string &snapshotTime,
-                                       const std::string &filePath)
-{
-    if (!m_initialized)
-    {
-        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
-        return false;
-    }
-
-    // 構建JSON payload
-    rapidjson::Document document;
-    document.SetObject();
-    rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
-    document.AddMember(PAYLOAD_KEY_EVENT_ID, rapidjson::Value(eventId.c_str(), allocator).Move(), allocator);
-
-    const std::string &camId = CameraParametersManager::getInstance().getCameraId();
-    document.AddMember(PAYLOAD_KEY_CAMID, rapidjson::Value(camId.c_str(), allocator).Move(), allocator);
-    document.AddMember("snapshotTime", rapidjson::Value(snapshotTime.c_str(), allocator).Move(), allocator);
-    document.AddMember("filePath", rapidjson::Value(filePath.c_str(), allocator).Move(), allocator);
-
-    // 轉換為JSON字符串
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    document.Accept(writer);
-
-    // 發送命令
-    std::string response;
-    return sendCommand(_Snapshot, buffer.GetString(), response);
-}
-
-bool ChtP2PCameraCommandHandler::reportRecord(const std::string &eventId, const std::string &fromTime,
-                                     const std::string &toTime, const std::string &filePath,
-                                     const std::string &thumbnailfilePath)
-{
-    if (!m_initialized)
-    {
-        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
-        return false;
-    }
-
-    // 構建JSON payload - 符合客戶規格要求
-    rapidjson::Document document;
-    document.SetObject();
-    rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
-
-    // 獲取攝影機ID
-    const std::string &camId = CameraParametersManager::getInstance().getCameraId();
-
-    // 加入所有必要欄位
-    document.AddMember(PAYLOAD_KEY_EVENT_ID, rapidjson::Value(eventId.c_str(), allocator).Move(), allocator);
-    document.AddMember(PAYLOAD_KEY_CAMID, rapidjson::Value(camId.c_str(), allocator).Move(), allocator);
-    document.AddMember("fromTime", rapidjson::Value(fromTime.c_str(), allocator).Move(), allocator);
-    document.AddMember("toTime", rapidjson::Value(toTime.c_str(), allocator).Move(), allocator);
-    document.AddMember("filePath", rapidjson::Value(filePath.c_str(), allocator).Move(), allocator);
-    document.AddMember("thumbnailfilePath", rapidjson::Value(thumbnailfilePath.c_str(), allocator).Move(), allocator);
-
-    // 轉換為JSON字串
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    document.Accept(writer);
-
-    // 調試輸出JSON payload
-    std::cout << "[API-DEBUG] reportRecord 發送 JSON payload: " << buffer.GetString() << std::endl;
-
-    // 發送命令
-    std::string response;
-    bool result = sendCommand(_Record, buffer.GetString(), response);
-
-    if (result)
-    {
-        std::cout << "錄影事件回報成功 - EventID: " << eventId << std::endl;
-        std::cout << "  影片檔案: " << filePath << std::endl;
-        std::cout << "  縮圖檔案: " << thumbnailfilePath << std::endl;
-    }
-    else
-    {
-        std::cerr << "錄影事件回報失敗 - EventID: " << eventId << std::endl;
-    }
-
-    return result;
-}
-
-bool ChtP2PCameraCommandHandler::reportRecognition(const std::string &eventId, const std::string &eventTime,
-                                          const std::string &eventType, const std::string &eventClass,
-                                          const std::string &videoFilePath, const std::string &snapshotFilePath,
-                                          const std::string &audioFilePath, const std::string &coordinate,
-                                          const std::string &resultAttributeJson)
-{
-    if (!m_initialized)
-    {
-        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
-        return false;
-    }
-
-    // 解析結果屬性JSON
-    rapidjson::Document resultAttribute;
-    resultAttribute.SetObject();
-
-    try
-    {
-        if (!resultAttributeJson.empty())
-        {
-            rapidjson::ParseResult parseResult = resultAttribute.Parse(resultAttributeJson.c_str());
-            if (parseResult.IsError())
-            {
-                std::cerr << "解析結果屬性JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-                return false;
-            }
-        }
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "解析結果屬性JSON失敗: " << e.what() << std::endl;
-        return false;
-    }
-
-    // 構建JSON payload
-    rapidjson::Document document;
-    document.SetObject();
-    rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
-    document.AddMember(PAYLOAD_KEY_EVENT_ID, rapidjson::Value(eventId.c_str(), allocator).Move(), allocator);
-
-    const std::string &camId = CameraParametersManager::getInstance().getCameraId();
-    document.AddMember(PAYLOAD_KEY_CAMID, rapidjson::Value(camId.c_str(), allocator).Move(), allocator);
-
-    document.AddMember("eventTime", rapidjson::Value(eventTime.c_str(), allocator).Move(), allocator);
-    document.AddMember("eventType", rapidjson::Value(eventType.c_str(), allocator).Move(), allocator);
-    document.AddMember("eventClass", rapidjson::Value(eventClass.c_str(), allocator).Move(), allocator);
-    document.AddMember("videoFilePath", rapidjson::Value(videoFilePath.c_str(), allocator).Move(), allocator);
-    document.AddMember("snapshotFilePath", rapidjson::Value(snapshotFilePath.c_str(), allocator).Move(), allocator);
-    document.AddMember("audioFilePath", rapidjson::Value(audioFilePath.c_str(), allocator).Move(), allocator);
-    document.AddMember("coordinate", rapidjson::Value(coordinate.c_str(), allocator).Move(), allocator);
-    document.AddMember("resultAttribute", resultAttribute, allocator);
-
-    // 轉換為JSON字符串
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    document.Accept(writer);
-
-    // 發送命令
-    std::string response;
-    return sendCommand(_Recognition, buffer.GetString(), response);
-}
-
-bool ChtP2PCameraCommandHandler::reportStatusEvent(const std::string &eventId, int type, const std::string &camId,
-                                          const std::string &statusOrHealth, bool isStatus)
-{
-    if (!m_initialized)
-    {
-        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
-        return false;
-    }
-
-    // 構建JSON payload
-    rapidjson::Document document;
-    document.SetObject();
-    rapidjson::Document::AllocatorType &allocator = document.GetAllocator();
-
-    document.AddMember(PAYLOAD_KEY_EVENT_ID, rapidjson::Value(eventId.c_str(), allocator).Move(), allocator);
-    document.AddMember("type", type, allocator);
-
-    rapidjson::Value recording(rapidjson::kObjectType);
-    recording.AddMember("camId", rapidjson::Value(camId.c_str(), allocator).Move(), allocator);
-
-    // 根據isStatus標誌增加不同的欄位
-    if (isStatus)
-    {
-        recording.AddMember("status", rapidjson::Value(statusOrHealth.c_str(), allocator).Move(), allocator);
-    }
-    else
-    {
-        recording.AddMember("externalStorageHealth", rapidjson::Value(statusOrHealth.c_str(), allocator).Move(), allocator);
-    }
-
-    document.AddMember("recording", recording, allocator);
-
-    // 轉換為JSON字符串
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    document.Accept(writer);
-
-    // 發送命令
-    std::string response;
-    return sendCommand(_StatusEvent, buffer.GetString(), response);
-}
-
-bool ChtP2PCameraCommandHandler::sendStreamData(const void *data, size_t dataSize, const std::string &requestId)
-{
-    if (!m_initialized)
-    {
-        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
-        return false;
-    }
-
-    // 構建metadata JSON
-    rapidjson::Document metadata;
-    metadata.SetObject();
-    rapidjson::Document::AllocatorType &allocator = metadata.GetAllocator();
-    metadata.AddMember("requestId", rapidjson::Value(requestId.c_str(), allocator).Move(), allocator);
-
-    // 轉換為JSON字符串
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    metadata.Accept(writer);
-
-    // 發送串流數據
-    int result = chtp2p_send_stream_data(data, buffer.GetString());
-    return (result == 0);
-}
-
 #if 0
 void ChtP2PCameraCommandHandler::setInitialInfoCallback(ChtP2PCameraAPI::InitialInfoCallback callback)
 {
     m_initialInfoCallback = callback;
-}
-
-void ChtP2PCameraCommandHandler::setControlCallback(ChtP2PCameraAPI::ControlCallback callback)
-{
-    m_controlCallback = callback;
-}
-
-void ChtP2PCameraCommandHandler::setAudioDataCallback(ChtP2PCameraAPI::AudioDataCallback callback)
-{
-    m_audioDataCallback = callback;
 }
 #endif
 
@@ -1031,103 +1533,6 @@ void ChtP2PCameraCommandHandler::commandDoneCallback(CHTP2P_CommandType commandT
     {
         std::cerr << "commandDoneCallback 找不到對應的命令上下文" << std::endl;
     }
-}
-
-void ChtP2PCameraCommandHandler::controlCallback(CHTP2P_ControlType controlType, void *controlHandle,
-                                        const char *payload, void *userParam)
-{
-    // 獲取ChtP2PCameraCommandHandler實例
-    ChtP2PCameraCommandHandler *self = static_cast<ChtP2PCameraCommandHandler *>(userParam);
-    if (!self)
-    {
-        std::cerr << "controlCallback 無效的用戶參數" << std::endl;
-        return;
-    }
-
-    std::string payloadStr = payload ? payload : "";
-    std::cout << "收到控制回調: controlType=" << controlType
-              << ", payload=" << payloadStr << std::endl;
-#if 0
-    // 如果已設置控制回調函數，則調用它
-    if (self->m_controlCallback)
-    {
-        try
-        {
-            // 調用用戶設置的回調函數獲取回應
-            std::string responsePayload = self->m_controlCallback(controlType, payloadStr);
-
-            // 發送控制完成響應
-            self->sendControlDone(controlType, controlHandle, responsePayload);
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "控制回調函數執行異常: " << e.what() << std::endl;
-
-            // 出錯時發送一個錯誤回應
-            rapidjson::Document errorResponse;
-            errorResponse.SetObject();
-            errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, errorResponse.GetAllocator());
-            errorResponse.AddMember("description", rapidjson::Value("處理控制請求時發生錯誤", errorResponse.GetAllocator()).Move(), errorResponse.GetAllocator());
-
-            rapidjson::StringBuffer buffer;
-            rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-            errorResponse.Accept(writer);
-            self->sendControlDone(controlType, controlHandle, buffer.GetString());
-        }
-    }
-    else
-    {
-        std::cerr << "未設置控制回調函數" << std::endl;
-
-        // 沒有回調處理函數時發送一個錯誤回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, errorResponse.GetAllocator());
-        errorResponse.AddMember("description", rapidjson::Value("未設置控制處理函數", errorResponse.GetAllocator()).Move(), errorResponse.GetAllocator());
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        self->sendControlDone(controlType, controlHandle, buffer.GetString());
-    }
-#endif
-}
-
-void ChtP2PCameraCommandHandler::audioCallback(const char *data, size_t dataSize, const char *metadata, void *userParam)
-{
-    // 獲取 ChtP2PCameraCommandHandler 實例
-    ChtP2PCameraCommandHandler *self = static_cast<ChtP2PCameraCommandHandler *>(userParam);
-    if (!self)
-    {
-        std::cerr << "audioCallback 無效的用戶參數" << std::endl;
-        return;
-    }
-
-    std::cout << "收到音頻回調: dataSize=" << dataSize << std::endl;
-    if (metadata)
-    {
-        std::cout << ", metadata=" << metadata;
-    }
-    std::cout << std::endl;
-#if 0
-    // 如果已設置音頻數據回調函數，則調用它
-    if (self->m_audioDataCallback && data)
-    {
-        try
-        {
-            // 調用用戶設置的回調函數處理音頻數據
-            self->m_audioDataCallback(data, dataSize, ""); // 傳入空字符串作為 metadata
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "音頻數據回調函數執行異常: " << e.what() << std::endl;
-        }
-    }
-    else
-    {
-        std::cerr << "未設置音頻數據回調函數或數據為空" << std::endl;
-    }
-#endif
 }
 
 // ===== 幫助函數實現 =====
@@ -1234,26 +1639,6 @@ bool ChtP2PCameraCommandHandler::sendCommand(CHTP2P_CommandType commandType,
     return false;
 }
 
-bool ChtP2PCameraCommandHandler::sendControlDone(CHTP2P_ControlType controlType, void *controlHandle,
-                                        const std::string &payload)
-{
-    if (!m_initialized)
-    {
-        std::cerr << "CHT P2P服務尚未初始化" << std::endl;
-        return false;
-    }
-
-    // 發送控制完成响應
-    int result = chtp2p_send_control_done(controlType, controlHandle, payload.c_str());
-    if (result != 0)
-    {
-        std::cerr << "發送控制完成响應失敗，錯誤碼: " << result << std::endl;
-        return false;
-    }
-
-    return true;
-}
-
 // 實現內部輔助函數
 void ChtP2PCameraCommandHandler::handleInitialInfoReceived(const std::string &hamiCamInfo,
                                                   const std::string &hamiSettings,
@@ -1306,14 +1691,15 @@ bool ChtP2PCameraCommandHandler::syncParametersToHardware()
     try
     {
         auto &paramsManager = CameraParametersManager::getInstance();
-        auto &driver = CameraDriver::getInstance();
+        //auto &driver = CameraDriver::getInstance();
 
         // 使用攝影機驅動同步硬體參數
-        return driver.syncHardwareFromParameters(paramsManager);
+        //return driver.syncHardwareFromParameters(paramsManager);
     }
     catch (const std::exception &e)
     {
         std::cerr << "ChtP2PCameraCommandHandler: 同步硬體參數時發生異常: " << e.what() << std::endl;
         return false;
     }
+    return false;
 }

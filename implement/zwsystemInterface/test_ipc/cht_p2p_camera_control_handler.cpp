@@ -553,8 +553,8 @@ std::string ChtP2PCameraControlHandler::handleGetCamStatusById(ChtP2PCameraContr
             paramsManager.isParameterStale("storageHealth", std::chrono::milliseconds(30000)))
         {
             std::cout << "參數已過期，開始同步硬體參數..." << std::endl;
-            bool syncResult = paramsManager.syncWithHardware(false);
-            std::cout << "硬體參數同步結果: " << (syncResult ? "成功" : "失敗") << std::endl;
+            //bool syncResult = paramsManager.syncWithHardware(false);
+            //std::cout << "硬體參數同步結果: " << (syncResult ? "成功" : "失敗") << std::endl;
         }
 
         // 獲取當前攝影機參數
@@ -566,7 +566,7 @@ std::string ChtP2PCameraControlHandler::handleGetCamStatusById(ChtP2PCameraContr
         long storageCapacity = paramsManager.getStorageCapacity();
         long storageAvailable = paramsManager.getStorageAvailable();
         std::string wifiSsid = paramsManager.getWifiSsid();
-        int wifiDbm = paramsManager.getWifiSignalStrength();
+        int wifiDbm = 0;//paramsManager.getWifiSignalStrength();
         bool microphoneEnabled = paramsManager.getMicrophoneEnabled();
         int speakerVolume = paramsManager.getSpeakerVolume();
         std::string imageQuality = paramsManager.getImageQuality();
@@ -2525,7 +2525,7 @@ std::string ChtP2PCameraControlHandler::handleSetCameraOSD(ChtP2PCameraControlHa
 
         response.AddMember("result", 1, allocator);
         response.AddMember("camId", rapidjson::Value(paramsManager.getCameraId().c_str(), allocator).Move(), allocator);
-        response.AddMember("Location", rapidjson::Value(locationrapidjson::Value.c_str(), allocator).Move(), allocator);
+        response.AddMember("Location", rapidjson::Value(locationValue.c_str(), allocator).Move(), allocator);
         response.AddMember("description", rapidjson::Value("成功設定攝影機 Location", allocator).Move(), allocator);
 
         rapidjson::StringBuffer buffer;
@@ -4314,7 +4314,7 @@ std::string ChtP2PCameraControlHandler::handleHamiCamFormatSDCard(ChtP2PCameraCo
                 // 設定卷標
                 time_t now = time(nullptr);
                 struct tm *ltm = localtime(&now);
-                char label[12];
+                char label[32];
                 snprintf(label, sizeof(label), "HAMI_%02d%02d%02d",
                         (ltm->tm_year + 1900) % 100, 1 + ltm->tm_mon, ltm->tm_mday);
 
@@ -4436,6 +4436,8 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlMove(ChtP2PCamera
         paramsManager.setParameter("ptzStatus", success ? "4" : "0");
         paramsManager.saveToFile();
 #endif
+        bool success = true; // 假設成功
+
         // 構建成功回應 - 使用 rapidjson
         rapidjson::Document response;
         response.SetObject();
@@ -4510,6 +4512,8 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigSpeed(ChtP2
         paramsManager.setParameter("ptzSpeed", std::to_string(speed));
         paramsManager.saveToFile();
 #endif
+        bool success = true; // 假設成功
+
         rapidjson::Document response;
         response.SetObject();
         rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
@@ -4576,13 +4580,14 @@ std::string ChtP2PCameraControlHandler::handleHamiCamGetPtzControl(ChtP2PCameraC
         if (!success) {
             throw std::runtime_error("Get PTZ agent status error!!!");
         }
+#endif
         std::string ptzTourStayTime = std::to_string(iTourStayTime);
         std::string speed = std::to_string(iSpeed);
         std::string humanTracking = std::to_string(iHumanTrackingSetting);
         std::string petTracking = std::to_string(iPetTrackingSetting);
         std::string ptzStatus = std::to_string(iStatus);
         std::string ptzPetStatus = std::to_string(iPetStatus);
-#endif
+
         rapidjson::Document response;
         response.SetObject();
         rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
@@ -4653,6 +4658,8 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlTourGo(ChtP2PCame
         paramsManager.setParameter("ptzTourSequence", indexSequence);
         paramsManager.setParameter("ptzStatus", "2"); // 巡航狀態
         paramsManager.saveToFile();
+#endif
+        bool success = true; // 假設成功
 
         // 構建成功回應 - 使用 rapidjson
         rapidjson::Document response;
@@ -4662,7 +4669,7 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlTourGo(ChtP2PCame
         response.AddMember(PAYLOAD_KEY_INDEX_SEQUENCE, rapidjson::Value(indexSequence.c_str(), allocator).Move(), allocator);
         if (success)
             response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("Send OK", allocator).Move(), allocator);
-#endif
+
         rapidjson::StringBuffer buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
         response.Accept(writer);
@@ -4814,7 +4821,7 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigPst(ChtP2PC
         std::cout << "PTZ設定預設點 - index: " << index << ", remove: " << remove << ", positionName: " << positionName << std::endl;
 
         // 設定PTZ預設點
-        bool success = CameraDriver::getInstance().setPTZPositionPoint(index, (remove == "1"), positionName);
+        //bool success = CameraDriver::getInstance().setPTZPositionPoint(index, (remove == "1"), positionName);
         // 儲存PTZ預設點名稱
         // positionNameNum = positionName1 or positionName2 or positionName3 or positionName4
         std::string positionNameNum = "positionName" + std::to_string(index);
@@ -4823,6 +4830,8 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigPst(ChtP2PC
         else if (remove == "1")
             paramsManager.setParameter(positionNameNum, " ");
         paramsManager.saveToFile();
+
+        bool success = true; // 假設成功
 
         // 構建成功回應 - 使用 rapidjson
         rapidjson::Document response;
@@ -4893,15 +4902,17 @@ std::string ChtP2PCameraControlHandler::handleHamiCamHumanTracking(ChtP2PCameraC
         std::cout << "人體追蹤開關 - val: " << val << std::endl;
 
         // 設定人體追蹤開關
-        bool success = CameraDriver::getInstance().setPTZHumanTracking(val);
+        //bool success = CameraDriver::getInstance().setPTZHumanTracking(val);
 
         // 儲存人體追蹤開關設定
         paramsManager.setParameter("humanTracking", std::to_string(val));
         paramsManager.saveToFile();
 
         // send ai setting to host_stream
-        CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
+        //CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
 
+        bool success = true; // 假設成功
+    
         // 構建成功回應 - 使用 rapidjson
         rapidjson::Document response;
         response.SetObject();
@@ -4966,14 +4977,16 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPetTracking(ChtP2PCameraCon
 
         std::cout << "寵物追蹤開關 - val: " << val << std::endl;
 
-        bool success = CameraDriver::getInstance().setPTZPetTracking(val);
+        //bool success = CameraDriver::getInstance().setPTZPetTracking(val);
 
         // 儲存寵物追蹤開關設定
         paramsManager.setParameter("petTracking", std::to_string(val));
         paramsManager.saveToFile();
 
         // send ai setting to host_stream
-        CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
+        //CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
+
+        bool success = true; // 假設成功
 
         // 構建成功回應 - 使用 rapidjson
         rapidjson::Document response;
@@ -5029,8 +5042,9 @@ std::string ChtP2PCameraControlHandler::handleGetHamiCamBindList(ChtP2PCameraCon
         std::cout << "INFO: 處理攝影機ID: " << camId << std::endl;
 
         // 檢查是否為模擬模式
-        auto &driver = CameraDriver::getInstance();
-        bool isSimulationMode = driver.isSimulationMode();
+        //auto &driver = CameraDriver::getInstance();
+        //bool isSimulationMode = driver.isSimulationMode();
+        bool isSimulationMode = false; // 假設非模擬模式
 
         // 讀取WiFi設定
         std::string wifiSsid = "";
@@ -5043,8 +5057,8 @@ std::string ChtP2PCameraControlHandler::handleGetHamiCamBindList(ChtP2PCameraCon
         }
         else
         {
-            wifiSsid = driver.getWifiSsid();
-            wifiPassword = driver.getWifiPassword();
+            //wifiSsid = driver.getWifiSsid();
+            //wifiPassword = driver.getWifiPassword();
         }
 
         if (wifiSsid.empty())
@@ -5194,9 +5208,10 @@ std::string ChtP2PCameraControlHandler::handleUpgradeHamiCamOTA(ChtP2PCameraCont
                     std::cout << "INFO: 開始執行 OTA 更新..." << std::endl;
 
                     // 檢查是否為模擬模式
-                    if (CameraDriver::getInstance().isSimulationMode()) {
-                        std::cout << "INFO: 模擬模式：模擬 OTA 更新完成" << std::endl;
-                    } else {
+                    //if (CameraDriver::getInstance().isSimulationMode()) {
+                    //    std::cout << "INFO: 模擬模式：模擬 OTA 更新完成" << std::endl;
+                    //} else 
+                    {
                         // 執行實際的 OTA 更新命令
                         std::string otaCmd = "sysupgrade -v " + filePath;
                         std::cout << "INFO: 執行 OTA 命令: " << otaCmd << std::endl;

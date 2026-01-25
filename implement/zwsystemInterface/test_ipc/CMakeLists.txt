@@ -10,6 +10,7 @@ set(CORE_SOURCES
     cht_p2p_camera_api.cpp
     cht_p2p_camera_command_handler.cpp
     cht_p2p_camera_control_handler.cpp
+    cht_p2p_camera_streaming_handler.cpp
     timezone_utils.cpp
 )
 

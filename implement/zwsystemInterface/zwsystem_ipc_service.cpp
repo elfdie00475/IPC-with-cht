@@ -14,7 +14,7 @@ using namespace llt;
 #define ZWSYSTEM_IPC_STRING_SIZE 256
 #endif
 
-void request_callback(const uint8_t *req_payload, size_t req_len, uint8_t **res_payload, size_t *res_len)
+void request_callback(void *param, const uint8_t *req_payload, size_t req_len, uint8_t **res_payload, size_t *res_len)
 {
 
 }

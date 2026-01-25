@@ -25,10 +25,10 @@
 #include "cht_p2p_camera_api.h"
 #include "cht_p2p_camera_control_handler.h"
 #include "camera_parameters_manager.h"
-#include "camera_driver.h"
-#include "stream_manager.h"
-#include "ReportManager.h"
-#include "cht_p2p_agent_payload_defined.h"
+//#include "camera_driver.h"
+//#include "stream_manager.h"
+//#include "ReportManager.h"
+//#include "cht_p2p_agent_payload_defined.h"
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>

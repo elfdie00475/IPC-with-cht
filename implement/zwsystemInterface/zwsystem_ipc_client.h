@@ -10,10 +10,24 @@
 extern "C" {
 #endif
 
+typedef enum zwsystem_sub_systemEventType {
+    eSystemEventType_Unknown = 0,
+    eSystemEventType_Snapshot,
+    eSystemEventType_Record,
+    eSystemEventType_Recognition,
+    eSystemEventType_StatusEvent
+} eZwsystemSubSystemEventType;
+
+typedef void (*zwsystem_sub_callback) (void *userParam, eZwsystemSubSystemEventType, const uint8_t *, size_t);
+
+int zwsystem_sub_subscribeSystemEvent(zwsystem_sub_callback callback, void *userParam);
+int zwsystem_sub_unsubscribeSystemEvent(void);
+
 extern int zwsystem_ipc_bindCameraReport(stBindCameraReportReq stReq, stBindCameraReportRep *pRep);
 extern int zwsystem_ipc_cameraRegister(stCamerRegisterReq stReq, stCamerRegisterRep *pRep);
 extern int zwsystem_ipc_checkHiOssStatus(stCheckHiOssStatusReq stReq, stCheckHiOssStatusRep *pRep);
 extern int zwsystem_ipc_getHamiCamInitialInfo(stGetHamiCamInitialInfoReq stReq, stGetHamiCamInitialInfoRep *pRep);
+extern int zwsystem_ipc_setHamiCamInitialInfo(stSetHamiCamInitialInfoReq stReq, stSetHamiCamInitialInfoRep *pRep);
 extern int zwsystem_ipc_getCamStatusById(stCamStatusByIdReq stReq, stCamStatusByIdRep *pRep);
 extern int zwsystem_ipc_deleteCameraInfo(stDeleteCameraInfoReq stReq, stDeleteCameraInfoRep *pRep);
 extern int zwsystem_ipc_setTimezone(stSetTimezoneReq stReq, stSetTimezoneRep *pRep);

@@ -16,7 +16,8 @@ namespace nngipc {
 static const uint32_t gc_maxWorkerNum = 8;
 
 std::shared_ptr<ResponseHandler> ResponseHandler::create(
-    const char *ipc_name, uint32_t worker_num, OutputCallback cb)
+    const char *ipc_name, uint32_t worker_num, 
+    OutputCallback cb, void *cb_param)
 {
     if (!ipc_name || strlen(ipc_name) == 0) {
         return nullptr;
@@ -26,7 +27,7 @@ std::shared_ptr<ResponseHandler> ResponseHandler::create(
     else if (worker_num > gc_maxWorkerNum) worker_num = gc_maxWorkerNum;
 
     const auto& handler = std::shared_ptr<ResponseHandler>(
-            new ResponseHandler(ipc_name, worker_num, cb));
+            new ResponseHandler(ipc_name, worker_num, cb, cb_param));
     if (!handler) {
         return nullptr;
     }
@@ -39,11 +40,13 @@ std::shared_ptr<ResponseHandler> ResponseHandler::create(
 }
 
 ResponseHandler::ResponseHandler(
-    const char *ipc_name, uint32_t worker_num, OutputCallback cb)
+    const char *ipc_name, uint32_t worker_num, 
+    OutputCallback cb, void *cb_param)
 : m_ipcName{std::string(ipc_name)},
   m_init{false},
   m_workerNum{worker_num},
-  m_outputCB{cb}
+  m_outputCB{cb},
+  m_outputCBParam{cb_param}
 {
     m_sock.id = 0;
     m_workers.reserve(worker_num);
@@ -71,7 +74,9 @@ bool ResponseHandler::init(void)
     }
 
     for (uint32_t i = 0; i < m_workerNum; i++) {
-        const auto& worker = AioWorker::create(m_sock, AioWorker::TYPE::Response, m_outputCB);
+        const auto& worker = AioWorker::create(
+                m_sock, AioWorker::TYPE::Response, 
+                m_outputCB, m_outputCBParam);
         if (worker) m_workers.push_back(worker);
     }
 

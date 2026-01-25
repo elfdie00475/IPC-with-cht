@@ -16,10 +16,9 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <queue>
+#include <vector>
 
-// ==============================
-// Custom / Project headers
-// ==============================
 #include "cht_p2p_camera_api.h"
 #include "camera_parameters_manager.h"
 #include "cht_p2p_camera_command_handler.h"
@@ -83,6 +82,30 @@ static void audioCallbackWrapper(const char *data, size_t dataSize, const char *
     self->audioCallback(data, dataSize, metadata, nullptr);
 }
 
+static void systemEventCallbackWrapper(void *userParam,
+        eZwsystemSubSystemEventType eventType, const uint8_t *data, size_t dataSize)
+{
+    if (!userParam) return;
+    auto *self = static_cast<ChtP2PCameraAPI *>(userParam);
+
+    // if event about snapshot, record, recognition, statusEvent
+    self->addSystemEvent(eventType, data, dataSize);
+}
+
+void ChtP2PCameraAPI::addSystemEvent(eZwsystemSubSystemEventType eventType,
+        const uint8_t *data, size_t dataSize)
+{
+    SystemEvent eventInfo;
+    eventInfo.eventType = eventType;
+    eventInfo.data.assign(data, data + dataSize);
+
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_eventQueue.push(eventInfo);
+    }
+    m_queueCV.notify_one();
+}
+
 bool ChtP2PCameraAPI::initialize(void)
 {
     if (m_initialized)
@@ -118,6 +141,17 @@ bool ChtP2PCameraAPI::initialize(void)
         return false;
     }
 
+    // subscribe system event
+    result = zwsystem_sub_subscribeSystemEvent(systemEventCallbackWrapper, this);
+    if (result != 0)
+    {
+        std::cerr << "Subscribe sytem event failed, error code: " << result << std::endl;
+        return false;
+    }
+
+    m_eventWorkerStopping = false;
+    m_eventWorkerThread = std::thread(&ChtP2PCameraAPI::eventWorkerThread, this);
+
     m_initialized = true;
     std::cout << "CHT P2P Agent初始化成功" << std::endl;
     return true;
@@ -129,6 +163,18 @@ void ChtP2PCameraAPI::deinitialize(void)
     {
         return;
     }
+
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_eventWorkerStopping = true;
+        m_queueCV.notify_one();
+    }
+
+    if (m_eventWorkerThread.joinable()) {
+        m_eventWorkerThread.join();
+    }
+
+    zwsystem_sub_unsubscribeSystemEvent();
 
     // 停止CHT P2P Agent
     chtp2p_deinitialize();
@@ -185,4 +231,86 @@ void ChtP2PCameraAPI::controlCallback(CHTP2P_ControlType type, void *handle,
 void ChtP2PCameraAPI::audioCallback(const char *data, size_t dataSize, const char *metadata, void *userParam)
 {
 
+}
+
+bool ChtP2PCameraAPI::isEventWorkerStopping(void)
+{
+    std::lock_guard<std::mutex> lock(m_queueMutex);
+    return m_eventWorkerStopping;
+}
+
+void ChtP2PCameraAPI::eventWorkerThread(void)
+{
+    printApiDebug("eventWorkerThread is started");
+
+    while (!isEventWorkerStopping()) {
+        std::unique_lock<std::mutex> lock(m_queueMutex);
+        
+        // 等待事件，或在 m_workerRunning 變為 false 時醒來
+        m_queueCV.wait(lock, [this] { return !m_eventQueue.empty() || !m_eventWorkerStopping; });
+        
+        if (!m_eventWorkerStopping) {
+            break;
+        }
+        
+        if (m_eventQueue.empty()) {
+            continue;
+        }
+        
+        SystemEvent event = m_eventQueue.front();
+        m_eventQueue.pop();
+        lock.unlock();
+        
+        // 在隊列鎖外處理事件
+        processSystemEvent(event);
+    }
+
+    printApiDebug("eventWorkerThread is stopped");
+}
+
+void ChtP2PCameraAPI::processSystemEvent(const SystemEvent& event)
+{
+    if (!m_initialized) return ;
+
+    eZwsystemSubSystemEventType eventType = event.eventType;
+    const uint8_t *data = event.data.data();
+    size_t dataSize = event.data.size();
+    
+    // if event about snapshot/record/recognition/statusEvent, call command handler to process by function
+    auto &cmdhandler = ChtP2PCameraCommandHandler::getInstance();
+    if (eventType == eSystemEventType_Snapshot) {
+        int res = cmdhandler.reportSnapshot(data, dataSize);
+        if (res != 0) {
+            printApiDebug("reportSnapshot failed, res=" + std::to_string(res));
+            // maybe let this event retry later?
+            // and save to local storage?
+            // next time when camera boots up, resend these failed events
+        }
+    } else if (eventType == eSystemEventType_Record) {
+        int res = cmdhandler.reportRecord(data, dataSize);
+        if (res != 0) {
+            printApiDebug("reportRecord failed, res=" + std::to_string(res));
+            // maybe let this event retry later?
+            // and save to local storage?
+            // next time when camera boots up, resend these failed events
+        }
+    } else if (eventType == eSystemEventType_Recognition) {
+        int res = cmdhandler.reportRecognition(data, dataSize);
+        if (res != 0) {
+            printApiDebug("reportRecognition failed, res=" + std::to_string(res));
+            // maybe let this event retry later?
+            // and save to local storage?
+            // next time when camera boots up, resend these failed events
+        }
+    } else if (eventType == eSystemEventType_StatusEvent) {
+        int res = cmdhandler.reportStatusEvent(data, dataSize);
+        if (res != 0) {
+            printApiDebug("reportStatusEvent failed, res=" + std::to_string(res));
+            // maybe let this event retry later?
+            // and save to local storage?
+            // next time when camera boots up, resend these failed events
+        }
+    } else {
+        printApiDebug("Unknown system event type received");
+    }
 }
