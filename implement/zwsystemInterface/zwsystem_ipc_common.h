@@ -141,6 +141,7 @@ typedef struct bind_camera_report_rep_st {
 } stBindCameraReportRep;
 
 #if 0
+#if 0
 typedef struct bind_camera_report_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
@@ -151,6 +152,7 @@ typedef struct bind_camera_report_rep_st {
     char netNo[ZWSYSTEM_IPC_STRING_SIZE];
     char userId[ZWSYSTEM_IPC_STRING_SIZE];
 } stBindCameraReportRep;
+#endif
 #endif
 
 typedef struct camera_register_req_st {
@@ -395,24 +397,11 @@ typedef struct set_hamicam_initial_info_req_st {
 
 typedef stDefault stSetHamiCamInitialInfoRep;
 
-typedef struct cam_status_by_id_req_st {
-    char tenantId[ZWSYSTEM_IPC_STRING_SIZE];
-    char netNo[ZWSYSTEM_IPC_STRING_SIZE];
-    int camSid;
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    char userId[ZWSYSTEM_IPC_STRING_SIZE];
-} stCamStatusByIdReq;
+typedef stDefault stCamStatusByIdReq;
 
 typedef struct cam_status_by_id_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    char tenantId[ZWSYSTEM_IPC_STRING_SIZE];
-    char netNo[ZWSYSTEM_IPC_STRING_SIZE];
-    int camSid;
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    char firmwareVer[ZWSYSTEM_IPC_STRING_SIZE];
-    char latestVersion[ZWSYSTEM_IPC_STRING_SIZE];
     bool isMicrophone; // 1: open, 0: close;
     uint32_t speakVolume; // 0~10
     eImageQualityMode imageQuality; // 0: low, 1: middle, 2: high
@@ -426,96 +415,55 @@ typedef struct cam_status_by_id_rep_st {
     int wifiDbm;
 } stCamStatusByIdRep;
 
-typedef struct delete_camera_info_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-} stDeleteCameraInfoReq;
-
-typedef struct delete_camera_info_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-} stDeleteCameraInfoRep;
+typedef stDefault stDeleteCameraInfoReq;
+typedef stDefault stDeleteCameraInfoRep;
 
 typedef enum datetime_type {
     DateTimeType_eManual = 0,
     DateTimeType_eNTP
 } eDateTimeType;
 
+typedef enum datetime_update_mask {
+    eDatetimeUpdateMask_SourceType  = (1u << 1),
+    eDatetimeUpdateMask_Timezone    = (1u << 2),
+    eDatetimeUpdateMask_ALL         = 0xFFFFFFFFu
+} eDatetimeUpdateMaskBit;
+
 typedef struct datetime_info_st {
-    eDateTimeType type;
+    int code;
+    char description[ZWSYSTEM_IPC_STRING_SIZE];
+    eDatetimeUpdateMaskBit updateBit; // for request
+    // about timezone
     bool daylightSavings;
-    uint32_t offset;
-    bool overrideTZ;
+    char TZStr[ZWSYSTEM_IPC_STRING_SIZE];
+    uint32_t offset; // for response
+    // for source type
+    eDateTimeType type;
+    // for manual
     int year;
     int month;
     int day;
     int hours;
     int minutes;
     int seconds;
-    char TZStr[ZWSYSTEM_IPC_STRING_SIZE];
 } stDateTimeInfo;
 
-typedef struct timezone_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    char tId[ZWSYSTEM_IPC_STRING_SIZE];
-
-    stDateTimeInfo dateTimeInfo;
-} stTimezoneReq;
-
-#define ZWSYSTEM_IPC_TIMEONE_ARRAY_SIZE 256
-
-typedef struct timezone_object_st {
-    char tid[ZWSYSTEM_IPC_STRING_SIZE];
-    char displayName[ZWSYSTEM_IPC_STRING_SIZE];
-    char baseUtcOffset[ZWSYSTEM_IPC_STRING_SIZE];
-    char TZ[ZWSYSTEM_IPC_STRING_SIZE];
-} stTimezoneObject;
-
-typedef struct timezone_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    char tId[ZWSYSTEM_IPC_STRING_SIZE];
-    uint32_t timezoneObjSize;
-    stTimezoneObject timezoneAll[ZWSYSTEM_IPC_TIMEONE_ARRAY_SIZE];
-
-    stDateTimeInfo dateTimeInfo;
-} stTimezoneRep;
-
-
-typedef stTimezoneReq stSetTimezoneReq;
-typedef stTimezoneReq stGetTimezoneReq;
-typedef stTimezoneRep stSetTimezoneRep;
-typedef stTimezoneRep stGetTimezoneRep;
-
-
-/* Extend */
-typedef stTimezoneRep stDateTimeInfoReq;
-typedef stTimezoneRep stDateTimeInfoRep;
+typedef stDateTimeInfo stSetTimezoneReq;
+typedef stDateTimeInfo stSetTimezoneRep;
+typedef stDateTimeInfo stGetTimezoneReq;
+typedef stDateTimeInfo stGetTimezoneRep;
 
 typedef struct update_camera_name_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char name[ZWSYSTEM_IPC_STRING_SIZE];
 } stUpdateCameraNameReq;
 
-typedef struct update_camera_name_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    char name[ZWSYSTEM_IPC_STRING_SIZE];
-} stUpdateCameraNameRep;
+typedef stDefault stUpdateCameraNameRep;
 
 typedef struct set_camera_OSD_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char osdRule[ZWSYSTEM_IPC_STRING_SIZE]; // yyyy MM dd HH mm ss
 } stSetCameraOsdReq;
 
-typedef struct set_camera_OSD_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    char osdRule[ZWSYSTEM_IPC_STRING_SIZE];
-} stSetCameraOsdRep;
+typedef stDefault stSetCameraOsdRep;
 
 typedef struct set_camera_HD_req_st {
     char camId[ZWSYSTEM_IPC_STRING_SIZE];
@@ -1144,17 +1092,16 @@ typedef struct get_media_all_config_rep_st {
     stGetMediaMetadataRep metadata[MEDIA_METADATA_MAX_SIZE];
 } stGetAllMediaConfigRep;
 
-typedef struct change_wifi_req_st {
-    char wifiSsid[ZWSYSTEM_IPC_STRING_SIZE];
-    char password[ZWSYSTEM_IPC_STRING_SIZE]; // base64
-} stChangeWifiReq;
-
 typedef struct change_wifi_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
     char wifiSsid[ZWSYSTEM_IPC_STRING_SIZE];
     int wifiDbm;
 } stChangeWifiRep;
+typedef struct change_wifi_req_st {
+    char wifiSsid[ZWSYSTEM_IPC_STRING_SIZE];
+    char password[ZWSYSTEM_IPC_STRING_SIZE]; // base64
+} stChangeWifiReq;
 
 #ifdef __cplusplus
 }

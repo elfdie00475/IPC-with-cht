@@ -14,6 +14,8 @@
 
 #include "cht_p2p_agent_c.h"
 
+#define REPORT_EVENT_NOT_RETRY -999
+
 struct BindCameraConfig {
     std::string userId;
     std::string netNo;
@@ -53,7 +55,7 @@ public:
     int reportStatusEvent(const uint8_t *data, size_t dataSize);
 
     // 事件回報
-    
+
 
     // 參數管理器輔助函數
     void scheduledSync();
@@ -90,29 +92,28 @@ private:
             const std::string& eventId, const std::string& snapshotTime, const std::string& filePath);
 
     bool reportRecord(const std::string& camId, const std::string& chtBarcode,
-            const std::string& eventId, 
+            const std::string& eventId,
             const std::string& fromTime, const std::string& toTime,
             const std::string& filePath, const std::string& thumbnailfilePath);
 
     bool reportRecognition(const std::string& camId, const std::string& chtBarcode,
             const std::string& eventId, const std::string& eventTime,
             const std::string& eventType, const std::string& eventClass,
-            const std::string& videoFilePath, const std::string& snapshotFilePath, const std::string& audioFilePath, 
+            const std::string& videoFilePath, const std::string& snapshotFilePath, const std::string& audioFilePath,
             const std::string& coordinate, const std::string& fidResult);
 
     bool reportStatusEvent(const std::string& camId, const std::string& chtBarcode,
-            const std::string& eventId, int type, 
+            const std::string& eventId, int type,
             const std::string &status, const std::string &storageHealth);
 
     // 命令處理幫助函數
     bool sendCommand(CHTP2P_CommandType commandType, const std::string &payload, std::string &response);
 
+    bool checkHiOssStatus(void);
+
     // 成員變量
     bool m_initialized;       // 初始化狀態
     std::mutex m_mutex;       // 互斥鎖
-
-    // 回調函數
-    //ChtP2PCameraAPI::InitialInfoCallback m_initialInfoCallback;
 
     // 命令回應同步處理
     struct CommandContext

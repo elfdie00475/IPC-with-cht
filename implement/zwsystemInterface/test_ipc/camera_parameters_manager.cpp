@@ -858,11 +858,9 @@ std::string CameraParametersManager::getCHTBarcode() const
     return (it != m_parameters.end()) ? it->second : "";
 }
 // 實現 getter 和 setter 方法
-std::string CameraParametersManager::getCamSid() const
+int CameraParametersManager::getCamSid() const
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    auto it = m_parameters.find("camSid");
-    return (it != m_parameters.end()) ? it->second : "";
+    return getParameter("camSid", 0);
 }
 
 std::string CameraParametersManager::getTenantId() const
@@ -904,11 +902,16 @@ std::string CameraParametersManager::getWifiSsid() const
     return (it != m_parameters.end()) ? it->second : "";
 }
 
-std::string CameraParametersManager::getFirmwareVersion() const
+std::string CameraParametersManager::getFirmwareVersion(void) const
 {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     auto it = m_parameters.find("firmwareVersion");
     return (it != m_parameters.end()) ? it->second : "";
+}
+
+std::string CameraParametersManager::getLatestFirmwareVersion(void) const
+{
+    return getFirmwareVersion();
 }
 
 std::string CameraParametersManager::getCameraStatus() const
@@ -1024,11 +1027,14 @@ const std::string &CameraParametersManager::getModel() const
     return (it != m_parameters.end()) ? it->second : defaultValue;
 }
 
-const std::string &CameraParametersManager::getIsCheckHioss() const
+bool CameraParametersManager::getHiOssStatus(void) const
 {
-    static std::string defaultValue = "0";
-    auto it = m_parameters.find("isCheckHioss");
-    return (it != m_parameters.end()) ? it->second : defaultValue;
+    return getParameter("HiOssStatus", false);
+}
+
+bool CameraParametersManager::getIsCheckHioss(void) const
+{
+    return getParameter("isCheckHioss", false);
 }
 
 const std::string &CameraParametersManager::getBrand() const
@@ -1055,7 +1061,7 @@ void CameraParametersManager::setPublicIp(const std::string &ip)
     setParameter("publicIp", ip);
 }
 
-void CameraParametersManager::setCamSid(const std::string &camSid)
+void CameraParametersManager::setCamSid(int camSid)
 {
     setParameter("camSid", camSid);
 }
@@ -1119,6 +1125,11 @@ void CameraParametersManager::setCameraType(const std::string &type)
 void CameraParametersManager::setModel(const std::string &model)
 {
     setParameter("model", model);
+}
+
+void CameraParametersManager::setHiOssStatus(bool value)
+{
+    setParameter("HiOssStatus", (value?"1":"0"));
 }
 
 void CameraParametersManager::setIsCheckHioss(bool value)
@@ -1582,7 +1593,7 @@ bool CameraParametersManager::parseHamiCamInfo(const std::string &jsonStr)
     // 解析 camSid (int)
     if (doc.HasMember("camSid") && doc["camSid"].IsInt())
     {
-        setCamSid(std::to_string(doc["camSid"].GetInt()));
+        setCamSid(doc["camSid"].GetInt());
         std::cout << "設定 camSid: " << doc["camSid"].GetInt() << std::endl;
     }
 

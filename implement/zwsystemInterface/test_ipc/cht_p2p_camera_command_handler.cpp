@@ -4,10 +4,14 @@
  * @date 2025/04/29
  */
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
+#include <cstdlib> // std::strtol
 #include <fstream>
 #include <future>
 #include <iomanip>
@@ -15,6 +19,7 @@
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <thread>
 #include <regex>
 #include <vector>
@@ -371,6 +376,7 @@ bool ChtP2PCameraCommandHandler::bindCameraReport(const std::string& camId,
 
         // 使用參數管理器獲取參數
         auto &paramsManager = CameraParametersManager::getInstance();
+        paramsManager.setCamSid(rep_camSid);
         paramsManager.setTenantId(rep_tenantId);
         paramsManager.setUserId(rep_userId);
         paramsManager.setNetNo(netNo);
@@ -489,7 +495,7 @@ int ChtP2PCameraCommandHandler::checkHiOSSstatus(bool& hiOssStatus)
         return -2;
     }
 
-    hiOssStatus = (paramsManager.getIsCheckHioss() != "0");
+    hiOssStatus = paramsManager.getHiOssStatus();
 
     return 0;
 }
@@ -511,7 +517,7 @@ bool ChtP2PCameraCommandHandler::checkHiOSSstatus(const std::string& camId,
     printApiDebug("模擬模式 HiOSS 狀態: " + std::string(hiossResult ? "允許" : "受限"));
 
     auto &paramsManager = CameraParametersManager::getInstance();
-    paramsManager.setParameter("hiossStatus", hiossResult ? "1" : "0");
+    paramsManager.setHiOssStatus(simHiossStatus);
     paramsManager.setIsCheckHioss(hiossResult);
     paramsManager.saveToFile();
 
@@ -554,7 +560,8 @@ bool ChtP2PCameraCommandHandler::checkHiOSSstatus(const std::string& camId,
 
         // 使用參數管理器獲取參數
         auto &paramsManager = CameraParametersManager::getInstance();
-        paramsManager.setIsCheckHioss(rep_status);
+        paramsManager.setHiOssStatus(rep_status);
+        paramsManager.setIsCheckHioss(true);
         paramsManager.saveToFile();
 
         return true;
@@ -716,9 +723,9 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         stReq.hamiSetting.statusIndicatorLight = rewriteIntParam(rep_statusIndicatorLight, 0, 1, false, -1);
         stReq.hamiSetting.isFlipUpDown = rewriteIntParam(rep_isFlipUpDown, 0, 1, false, -1);
         stReq.hamiSetting.isHd = rewriteIntParam(rep_isHd, 0, 1, false, -1);
-        stReq.hamiSetting.flicker = (eFlickerMode)rewriteIntParam(rep_flicker, 
+        stReq.hamiSetting.flicker = (eFlickerMode)rewriteIntParam(rep_flicker,
             (int)eFlicker_50Hz, (int)eFlicker_Outdoor, true, (int)eFlicker_60Hz);
-        stReq.hamiSetting.imageQuality = (eImageQualityMode)rewriteIntParam(rep_imageQuality, 
+        stReq.hamiSetting.imageQuality = (eImageQualityMode)rewriteIntParam(rep_imageQuality,
             (int)eImageQuality_Low, (int)eImageQuality_High, true, (int)eImageQuality_Middle);
         stReq.hamiSetting.isMicrophone = rewriteIntParam(rep_isMic, 0, 1, false, -1);
         stReq.hamiSetting.microphoneSensitivity = rewriteIntParam(rep_micSen, 0, 10, true, 3);
@@ -743,15 +750,15 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         stReq.hamiSetting.vmd = rewriteIntParam(rep_vmd, 0, 1, false, -1);
         stReq.hamiSetting.ad = rewriteIntParam(rep_ad, 0, 1, false, -1);
         stReq.hamiSetting.power = rewriteIntParam(rep_power, 0, 100, true, 50);
-        stReq.hamiSetting.ptzStatus = (ePtzStatus)rewriteIntParam(rep_ptzStatus, 
+        stReq.hamiSetting.ptzStatus = (ePtzStatus)rewriteIntParam(rep_ptzStatus,
             (int)ePtzStatus_None, (int)ePtzStatus_Stay, true, (int)ePtzStatus_None);
-        stReq.hamiSetting.ptzPetStatus = (ePtzStatus)rewriteIntParam(rep_ptzPetStatus, 
+        stReq.hamiSetting.ptzPetStatus = (ePtzStatus)rewriteIntParam(rep_ptzPetStatus,
             (int)ePtzStatus_None, (int)ePtzStatus_Stay, true, (int)ePtzStatus_None);
         stReq.hamiSetting.ptzSpeed = (float)rewriteIntParam(rep_ptzSpeed, 0, 2, true, 1);
         stReq.hamiSetting.ptzTourStayTime = rewriteIntParam(rep_ptzTourStayTime, 1, 5, true, 5);
-        stReq.hamiSetting.humanTracking = (ePtzTrackingMode)rewriteIntParam(rep_humanTracking, 
+        stReq.hamiSetting.humanTracking = (ePtzTrackingMode)rewriteIntParam(rep_humanTracking,
             (int)ePtzTracking_Off, (int)ePtzTracking_Stay, true, (int)ePtzTracking_Off);
-        stReq.hamiSetting.petTracking = (ePtzTrackingMode)rewriteIntParam(rep_petTracking, 
+        stReq.hamiSetting.petTracking = (ePtzTrackingMode)rewriteIntParam(rep_petTracking,
             (int)ePtzTracking_Off, (int)ePtzTracking_Stay, true, (int)ePtzTracking_Off);
 
         int rep_scheduleOn = GetIntMember(rep_hamiSettingObj, PAYLOAD_KEY_SCHEDULE_ON);
@@ -778,19 +785,19 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
             !validateScheduleString(rep_scheduleSat)) {
             throw std::runtime_error("Invalid schedule string format");
         }
-        snprintf(stReq.hamiSetting.scheduleSun, sizeof(stReq.hamiSetting.scheduleSun), 
+        snprintf(stReq.hamiSetting.scheduleSun, sizeof(stReq.hamiSetting.scheduleSun),
                     "%s", rep_scheduleSun.c_str());
-        snprintf(stReq.hamiSetting.scheduleMon, sizeof(stReq.hamiSetting.scheduleMon), 
+        snprintf(stReq.hamiSetting.scheduleMon, sizeof(stReq.hamiSetting.scheduleMon),
                     "%s", rep_scheduleMon.c_str());
-        snprintf(stReq.hamiSetting.scheduleTue, sizeof(stReq.hamiSetting.scheduleTue), 
+        snprintf(stReq.hamiSetting.scheduleTue, sizeof(stReq.hamiSetting.scheduleTue),
                     "%s", rep_scheduleTue.c_str());
-        snprintf(stReq.hamiSetting.scheduleWed, sizeof(stReq.hamiSetting.scheduleWed), 
+        snprintf(stReq.hamiSetting.scheduleWed, sizeof(stReq.hamiSetting.scheduleWed),
                     "%s", rep_scheduleWed.c_str());
-        snprintf(stReq.hamiSetting.scheduleThu, sizeof(stReq.hamiSetting.scheduleThu), 
+        snprintf(stReq.hamiSetting.scheduleThu, sizeof(stReq.hamiSetting.scheduleThu),
                     "%s", rep_scheduleThu.c_str());
-        snprintf(stReq.hamiSetting.scheduleFri, sizeof(stReq.hamiSetting.scheduleFri), 
+        snprintf(stReq.hamiSetting.scheduleFri, sizeof(stReq.hamiSetting.scheduleFri),
                     "%s", rep_scheduleFri.c_str());
-        snprintf(stReq.hamiSetting.scheduleSat, sizeof(stReq.hamiSetting.scheduleSat), 
+        snprintf(stReq.hamiSetting.scheduleSat, sizeof(stReq.hamiSetting.scheduleSat),
                     "%s", rep_scheduleSat.c_str());
 
         // check aiSetting
@@ -818,7 +825,7 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         int rep_adDogSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_DOG_SEN);
         int rep_adCatSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_AD_CAT_SEN);
         int rep_fallSen = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FALL_SEN);
-        int rep_fallTime = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FALL_TIME);    
+        int rep_fallTime = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FALL_TIME);
         stReq.hamiAiSetting.vmdAlert = rewriteIntParam(rep_vmdAlert, 0, 1, false, -1);
         stReq.hamiAiSetting.humanAlert = rewriteIntParam(rep_humanAlert, 0, 1, false, -1);
         stReq.hamiAiSetting.petAlert = rewriteIntParam(rep_petAlert, 0, 1, false, -1);
@@ -831,34 +838,34 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         stReq.hamiAiSetting.adAlarmAlert = rewriteIntParam(rep_adAlarmAlert, 0, 1, false, -1);
         stReq.hamiAiSetting.adDogAlert = rewriteIntParam(rep_adDogAlert, 0, 1, false, -1);
         stReq.hamiAiSetting.adCatAlert = rewriteIntParam(rep_adCatAlert, 0, 1, false, -1);
-        stReq.hamiAiSetting.vmdSen = (eSenMode)rewriteIntParam(rep_vmdSen, 
+        stReq.hamiAiSetting.vmdSen = (eSenMode)rewriteIntParam(rep_vmdSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.adSen = (eSenMode)rewriteIntParam(rep_adSen, 
+        stReq.hamiAiSetting.adSen = (eSenMode)rewriteIntParam(rep_adSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.humanSen = (eSenMode)rewriteIntParam(rep_humanSen, 
+        stReq.hamiAiSetting.humanSen = (eSenMode)rewriteIntParam(rep_humanSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.faceSen = (eSenMode)rewriteIntParam(rep_faceSen, 
+        stReq.hamiAiSetting.faceSen = (eSenMode)rewriteIntParam(rep_faceSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.fenceSen = (eSenMode)rewriteIntParam(rep_fenceSen, 
+        stReq.hamiAiSetting.fenceSen = (eSenMode)rewriteIntParam(rep_fenceSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.petSen = (eSenMode)rewriteIntParam(rep_petSen, 
+        stReq.hamiAiSetting.petSen = (eSenMode)rewriteIntParam(rep_petSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.adBabyCrySen = (eSenMode)rewriteIntParam(rep_adBabyCrySen, 
+        stReq.hamiAiSetting.adBabyCrySen = (eSenMode)rewriteIntParam(rep_adBabyCrySen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
         stReq.hamiAiSetting.adSpeechSen = (eSenMode)rewriteIntParam(rep_adSpeechSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.adAlarmSen = (eSenMode)rewriteIntParam(rep_adAlarmSen, 
+        stReq.hamiAiSetting.adAlarmSen = (eSenMode)rewriteIntParam(rep_adAlarmSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.adDogSen = (eSenMode)rewriteIntParam(rep_adDogSen, 
+        stReq.hamiAiSetting.adDogSen = (eSenMode)rewriteIntParam(rep_adDogSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.adCatSen = (eSenMode)rewriteIntParam(rep_adCatSen, 
+        stReq.hamiAiSetting.adCatSen = (eSenMode)rewriteIntParam(rep_adCatSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
-        stReq.hamiAiSetting.fallSen = (eSenMode)rewriteIntParam(rep_fallSen, 
+        stReq.hamiAiSetting.fallSen = (eSenMode)rewriteIntParam(rep_fallSen,
             (int)eSenMode_Low, (int)eSenMode_High, true, (int)eSenMode_Middle);
         stReq.hamiAiSetting.fallTime = rewriteIntParam(rep_fallTime, 1, 5, true, 3);
 
         const rapidjson::Value& rep_identificationFeatures = GetObjectMember(rep_hamiAiSettingObj, PAYLOAD_KEY_IDENTIFICATION_FEATURES);
-    
+
         if (rep_identificationFeatures.IsArray()) {
             rapidjson::SizeType i = 0;
             for (i = 0; i < rep_identificationFeatures.Size(); i++) {
@@ -872,7 +879,7 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
                 const std::string& rep_name = GetStringMember(featureObj, PAYLOAD_KEY_NAME);
                 int rep_verifyLevel = GetIntMember(featureObj, PAYLOAD_KEY_VERIFY_LEVEL);
                 rep_verifyLevel = rewriteIntParam(rep_verifyLevel, 1, 2, true, 2);
-        
+
                 const rapidjson::Value& rep_faceFeaturesBlob = GetObjectMember(featureObj, PAYLOAD_KEY_FACE_FEATURES);
                 if (rep_faceFeaturesBlob.IsString()) {
                     const char *blobData = rep_faceFeaturesBlob.GetString();
@@ -887,13 +894,13 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
                 const std::string& rep_updateTime = GetStringMember(featureObj, PAYLOAD_KEY_UPDATE_TIME);
 
                 feature->id = rep_id;
-                feature->verifyLevel = (eVerifyLevel)rewriteIntParam(rep_verifyLevel, 
+                feature->verifyLevel = (eVerifyLevel)rewriteIntParam(rep_verifyLevel,
                     (int)eVerifyLevel_Low, (int)eVerifyLevel_High, true, (int)eVerifyLevel_High);
-                snprintf(feature->name, sizeof(feature->name), 
+                snprintf(feature->name, sizeof(feature->name),
                             "%s", rep_name.c_str());
-                snprintf(feature->createTime, sizeof(feature->createTime), 
+                snprintf(feature->createTime, sizeof(feature->createTime),
                             "%s", rep_createTime.c_str());
-                snprintf(feature->updateTime, sizeof(feature->updateTime), 
+                snprintf(feature->updateTime, sizeof(feature->updateTime),
                             "%s", rep_updateTime.c_str());
             }
         }
@@ -930,23 +937,23 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
         stReq.hamiAiSetting.fencePos[3].y = fencePos4.y;
 
         int rep_fenceDir = GetIntMember(rep_hamiAiSettingObj, PAYLOAD_KEY_FENCE_DIR);
-        stReq.hamiAiSetting.fenceDir = (eFenceDirection)rewriteIntParam(rep_fenceDir, 
+        stReq.hamiAiSetting.fenceDir = (eFenceDirection)rewriteIntParam(rep_fenceDir,
             (int)eFenceDir_Out2In, (int)eFenceDir_In2Out, false, -1);
 
         stReq.hamiAiSetting.updateBit = eAiSettingUpdateMask_ALL;
         stReq.hamiAiSetting.fencePosUpdateBit = eFencePosUpdateMask_ALL;
-    
+
         // check systemSetting
         const std::string& rep_otaDomainName = GetStringMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_OTA_DOMAIN_NAME);
         int rep_otaQueryInterval = GetIntMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_OTA_QUERY_INTERVAL);
         const std::string& rep_ntpServer = GetStringMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_NTP_SERVER);
         const std::string& bucketName = GetStringMember(rep_hamiSystemSettingObj, PAYLOAD_KEY_BUCKET_NAME);
         stReq.hamiSystemSetting.otaQueryInterval = rep_otaQueryInterval;
-        snprintf(stReq.hamiSystemSetting.otaDomainName, sizeof(stReq.hamiSystemSetting.otaDomainName), 
+        snprintf(stReq.hamiSystemSetting.otaDomainName, sizeof(stReq.hamiSystemSetting.otaDomainName),
                         "%s", rep_otaDomainName.c_str());
-        snprintf(stReq.hamiSystemSetting.ntpServer, sizeof(stReq.hamiSystemSetting.ntpServer), 
+        snprintf(stReq.hamiSystemSetting.ntpServer, sizeof(stReq.hamiSystemSetting.ntpServer),
                         "%s", rep_ntpServer.c_str());
-        snprintf(stReq.hamiSystemSetting.bucketName, sizeof(stReq.hamiSystemSetting.bucketName), 
+        snprintf(stReq.hamiSystemSetting.bucketName, sizeof(stReq.hamiSystemSetting.bucketName),
                         "%s", bucketName.c_str());
 
         int rc = zwsystem_ipc_setHamiCamInitialInfo(stReq, &stRep);
@@ -955,7 +962,7 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
                       << ", code=" << stRep.code << std::endl;
             return false;
         }
-        
+
         return true;
 
     } catch (const std::exception &e) {
@@ -966,6 +973,78 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
     return false;
 }
 
+bool ChtP2PCameraCommandHandler::checkHiOssStatus(void)
+{
+#ifndef SIMULATION_MODE
+    auto &paramsManager = CameraParametersManager::getInstance();
+
+    // 檢查HiOSS狀態 - 根據規格2.2要求
+    bool isCheckHiOss = paramsManager.getIsCheckHioss();
+    if (isCheckHiOss) {
+        std::cerr << "Camera does not bind yet, drop control function" << std::endl;
+        return false;
+    }
+
+    // 如果HiOSS狀態為false（"0"），則僅接收解綁攝影機指令(_DeleteCameraInfo)
+    bool hiOssStatus = paramsManager.getHiOssStatus();
+    return hiOssStatus;
+#endif
+
+    return true;
+}
+
+static bool is_leap_year(int y) {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+static int days_in_month(int y, int m) {
+    static const int d[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    if (m == 2) return d[1] + (is_leap_year(y) ? 1 : 0);
+    return d[m - 1];
+}
+
+static bool is_valid_utc_ms(const std::string& s)
+{
+    // YYYY-MM-DDTHH:MM:SS.mmmZ
+    static const std::regex re(
+        R"(^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$)"
+    );
+
+    std::smatch m;
+    if (!std::regex_match(s, m, re)) return false;
+
+    auto to_int = [](const std::string& x) -> int {
+        return static_cast<int>(std::strtol(x.c_str(), nullptr, 10));
+    };
+
+    const int year  = to_int(m[1]);
+    const int mon   = to_int(m[2]);
+    const int day   = to_int(m[3]);
+    const int hour  = to_int(m[4]);
+    const int min   = to_int(m[5]);
+    const int sec   = to_int(m[6]);
+    const int msec  = to_int(m[7]);
+
+    if (mon < 1 || mon > 12) return false;
+    const int dim = days_in_month(year, mon);
+    if (day < 1 || day > dim) return false;
+
+    if (hour < 0 || hour > 23) return false;
+    if (min < 0 || min > 59) return false;
+    if (sec < 0 || sec > 59) return false;
+    if (msec < 0 || msec > 999) return false;
+
+    return true;
+}
+
+static bool readable_regular_file(const std::string& p)
+{
+    struct stat st;
+    if (::stat(p.c_str(), &st) != 0) return false;
+    if (!S_ISREG(st.st_mode)) return false;
+    return ::access(p.c_str(), R_OK) == 0;
+}
+
 int ChtP2PCameraCommandHandler::reportSnapshot(const uint8_t *data, size_t dataSize)
 {
     if (!m_initialized)
@@ -974,13 +1053,19 @@ int ChtP2PCameraCommandHandler::reportSnapshot(const uint8_t *data, size_t dataS
         return -1;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
+
     if (data == NULL || dataSize == 0 || dataSize != sizeof(stSnapshotEventSub))
     {
         std::cerr << "Invalid data!!!" << std::endl;
         return -2;
     }
 
-    stSnapshotEventSub *pSub = (stSnapshotEventSub *)data; 
+    stSnapshotEventSub *pSub = (stSnapshotEventSub *)data;
     std::string eventId(pSub->eventId);
     std::string snapshotTime(pSub->snapshotTime);
     std::string filePath(pSub->filePath);
@@ -989,16 +1074,27 @@ int ChtP2PCameraCommandHandler::reportSnapshot(const uint8_t *data, size_t dataS
         return -2;
     }
 
+    if (!is_valid_utc_ms(snapshotTime)) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    // check filePath have file
+    if (!readable_regular_file(filePath)) {
+        std::cerr << "The file does not exist or is not readable, drop this event!!! filePath=" << filePath << std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
+
     auto &paramsManager = CameraParametersManager::getInstance();
     const std::string& camId = paramsManager.getCameraId();
     const std::string& chtBarcode = paramsManager.getCHTBarcode();
-    
+
     bool snapRes = reportSnapshot(camId, chtBarcode, eventId, snapshotTime, filePath);
     if (!snapRes) {
         std::cerr << "reportSnapshot failed!!!" << std::endl;
         return -3;
     }
-    
+
     return 0;
 }
 
@@ -1011,9 +1107,24 @@ bool ChtP2PCameraCommandHandler::reportSnapshot(const std::string& camId, const 
         return false;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return false;
+    }
+
     auto require_non_empty = [](const std::string& s) { return !s.empty(); };
     if (!require_non_empty(camId) || !require_non_empty(eventId) ||
         !require_non_empty(snapshotTime) || !require_non_empty(filePath)) {
+        return false;
+    }
+
+    if (!is_valid_utc_ms(snapshotTime)) {
+        return false;
+    }
+
+    // check filePath have file
+    if (!readable_regular_file(filePath)) {
         return false;
     }
 
@@ -1070,13 +1181,19 @@ int ChtP2PCameraCommandHandler::reportRecord(const uint8_t *data, size_t dataSiz
         return -1;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
+
     if (data == NULL || dataSize == 0 || dataSize != sizeof(stRecordEventSub))
     {
         std::cerr << "Invalid data!!!" << std::endl;
         return -2;
     }
 
-    stRecordEventSub *pSub = (stRecordEventSub *)data; 
+    stRecordEventSub *pSub = (stRecordEventSub *)data;
     std::string eventId(pSub->eventId);
     std::string fromTime(pSub->fromTime);
     std::string toTime(pSub->toTime);
@@ -1089,23 +1206,35 @@ int ChtP2PCameraCommandHandler::reportRecord(const uint8_t *data, size_t dataSiz
     }
 
     // check fromTime and toTime format is like "2024-09-19 00:00:30.000"
+    if (!is_valid_utc_ms(fromTime) || !is_valid_utc_ms(toTime) ) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    // check filePath have file
+    if (!readable_regular_file(filePath) || !readable_regular_file(thumbnailfilePath) ) {
+        std::cerr << "The file does not exist or is not readable, drop this event!!!" <<
+                " filePath=" << filePath <<
+                " , thumbnailfilePath=" << thumbnailfilePath<< std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
 
     auto &paramsManager = CameraParametersManager::getInstance();
     const std::string& camId = paramsManager.getCameraId();
     const std::string& chtBarcode = paramsManager.getCHTBarcode();
-    
-    bool recRes = reportRecord(camId, chtBarcode, eventId, 
+
+    bool recRes = reportRecord(camId, chtBarcode, eventId,
             fromTime, toTime, filePath, thumbnailfilePath);
     if (!recRes) {
         std::cerr << "reportRecord failed!!!" << std::endl;
         return -3;
     }
-    
+
     return 0;
 }
 
 bool ChtP2PCameraCommandHandler::reportRecord(const std::string& camId, const std::string& chtBarcode,
-        const std::string &eventId, 
+        const std::string &eventId,
         const std::string &fromTime, const std::string &toTime,
         const std::string &filePath, const std::string &thumbnailfilePath)
 {
@@ -1115,14 +1244,26 @@ bool ChtP2PCameraCommandHandler::reportRecord(const std::string& camId, const st
         return false;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return false;
+    }
+
     auto require_non_empty = [](const std::string& s) { return !s.empty(); };
     if (!require_non_empty(camId) || !require_non_empty(eventId) ||
         !require_non_empty(fromTime) || !require_non_empty(toTime) ||
         !require_non_empty(filePath) || !require_non_empty(thumbnailfilePath)) {
         return false;
     }
+    if (!is_valid_utc_ms(fromTime) || !is_valid_utc_ms(toTime) ) {
+        return false;
+    }
 
-    // check fromTime and toTime format is like "2024-09-19 00:00:30.000"
+    // check filePath have file
+    if (!readable_regular_file(filePath) || !readable_regular_file(thumbnailfilePath) ) {
+        return false;
+    }
 
     try {
         // 構建JSON payload - 符合客戶規格要求
@@ -1183,13 +1324,19 @@ int ChtP2PCameraCommandHandler::reportRecognition(const uint8_t *data, size_t da
         return -1;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
+
     if (data == NULL || dataSize == 0 || dataSize != sizeof(stRecognitionEventSub))
     {
         std::cerr << "Invalid data!!!" << std::endl;
         return -2;
     }
 
-    stRecognitionEventSub *pSub = (stRecognitionEventSub *)data; 
+    stRecognitionEventSub *pSub = (stRecognitionEventSub *)data;
     std::string eventId(pSub->eventId);
     std::string eventTime(pSub->eventTime);
     eRecognitionType eventType = (eRecognitionType)pSub->eventType;
@@ -1200,30 +1347,45 @@ int ChtP2PCameraCommandHandler::reportRecognition(const uint8_t *data, size_t da
     std::string coordinate(pSub->coordinate);
     std::string fidResult(pSub->fidResult);
 
-
-    if (eventId.empty() || eventTime.empty() || 
+    if (eventId.empty() || eventTime.empty() ||
         (videoFilePath.empty() && snapshotFilePath.empty() && audioFilePath.empty())) {
         std::cerr << "Invalid parameter in data!!!" << std::endl;
         return -2;
     }
 
     // check eventTime format is like "2024-09-19 00:00:30.000"
+    if (!is_valid_utc_ms(eventTime)) {
+        std::cerr << "Invalid parameter in data!!!" << std::endl;
+        return -2;
+    }
+
+    // check filePath have file
+    if ( (!videoFilePath.empty() && !readable_regular_file(videoFilePath)) ||
+         (!snapshotFilePath.empty() && !readable_regular_file(snapshotFilePath)) ||
+         (!audioFilePath.empty() && !readable_regular_file(audioFilePath)) ) {
+        std::cerr << "The file does not exist or is not readable, drop this event!!!" <<
+                " videoFilePath=" << (videoFilePath.empty()?"":videoFilePath) <<
+                " , snapshotFilePath=" << (snapshotFilePath.empty()?"":snapshotFilePath) <<
+                " , audioFilePath=" << (audioFilePath.empty()?"":audioFilePath) << std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
+
     std::string eventTypeStr = zwsystem_ipc_recognitionType_int2str(eventType);
     std::string eventClassStr = zwsystem_ipc_eventClass_int2str(eventClass);
 
     auto &paramsManager = CameraParametersManager::getInstance();
     const std::string& camId = paramsManager.getCameraId();
     const std::string& chtBarcode = paramsManager.getCHTBarcode();
-    
-    bool recognRes = reportRecognition(camId, chtBarcode, eventId, 
-            eventTime, eventTypeStr, eventClassStr, 
-            videoFilePath, snapshotFilePath, audioFilePath, 
+
+    bool recognRes = reportRecognition(camId, chtBarcode, eventId,
+            eventTime, eventTypeStr, eventClassStr,
+            videoFilePath, snapshotFilePath, audioFilePath,
             coordinate, fidResult);
-    if (!recognRes) { 
+    if (!recognRes) {
         std::cerr << "reportRecognition failed!!!" << std::endl;
         return -3;
     }
-    
+
     return 0;
 }
 
@@ -1239,15 +1401,30 @@ bool ChtP2PCameraCommandHandler::reportRecognition(const std::string& camId, con
         return false;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return false;
+    }
+
     auto require_non_empty = [](const std::string& s) { return !s.empty(); };
     if (!require_non_empty(camId) || !require_non_empty(eventId) ||
-        !require_non_empty(eventTime) || !require_non_empty(eventType) || !require_non_empty(eventClass) || 
+        !require_non_empty(eventTime) || !require_non_empty(eventType) || !require_non_empty(eventClass) ||
         (!require_non_empty(videoFilePath) && !require_non_empty(snapshotFilePath) && !require_non_empty(audioFilePath))) {
         return false;
     }
 
     // check eventTime format is like "2024-09-19 00:00:30.000"
+    if (!is_valid_utc_ms(eventTime)) {
+        return false;
+    }
 
+    // check filePath have file
+    if ( (!videoFilePath.empty() && !readable_regular_file(videoFilePath)) ||
+         (!snapshotFilePath.empty() && !readable_regular_file(snapshotFilePath)) ||
+         (!audioFilePath.empty() && !readable_regular_file(audioFilePath)) ) {
+        return false;
+    }
 
     try
     {
@@ -1269,7 +1446,7 @@ bool ChtP2PCameraCommandHandler::reportRecognition(const std::string& camId, con
         rapidjson::Value resultAttribute(rapidjson::kObjectType);
         AddString(resultAttribute, PAYLOAD_KEY_FID_RESULT, fidResult.empty() ? "" : fidResult, allocator);
         document.AddMember(PAYLOAD_KEY_RESULT_ATTRIBUTE, resultAttribute, allocator);
-        
+
         // 轉換為JSON字符串
         rapidjson::StringBuffer buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -1316,13 +1493,19 @@ int ChtP2PCameraCommandHandler::reportStatusEvent(const uint8_t *data, size_t da
         return -1;
     }
 
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
+        return REPORT_EVENT_NOT_RETRY;
+    }
+
     if (data == NULL || dataSize == 0 || dataSize != sizeof(stCameraStatusEventSub))
     {
         std::cerr << "Invalid data!!!" << std::endl;
         return -2;
     }
 
-    stCameraStatusEventSub *pSub = (stCameraStatusEventSub *)data; 
+    stCameraStatusEventSub *pSub = (stCameraStatusEventSub *)data;
     std::string eventId(pSub->eventId);
     eCameraStatusEventType statusEventType = (eCameraStatusEventType)pSub->statusType;
     eCameraStatus status = (eCameraStatus)pSub->status;
@@ -1336,18 +1519,18 @@ int ChtP2PCameraCommandHandler::reportStatusEvent(const uint8_t *data, size_t da
     //std::string eventTypeStr = zwsystem_ipc_statusEventType_int2str(statusEventType);
     std::string statusStr = zwsystem_ipc_status_int2str(status);
     std::string externalStorageHealthStr = zwsystem_ipc_health_int2str(externalStorageHealth);
-    
+
     auto &paramsManager = CameraParametersManager::getInstance();
     const std::string& camId = paramsManager.getCameraId();
     const std::string& chtBarcode = paramsManager.getCHTBarcode();
-    
-    bool statusRes = reportStatusEvent(camId, chtBarcode, eventId, 
+
+    bool statusRes = reportStatusEvent(camId, chtBarcode, eventId,
             (int)statusEventType, statusStr, externalStorageHealthStr);
     if (!statusRes) {
         std::cerr << "reportStatusEvent failed!!!" << std::endl;
         return -3;
     }
-    
+
     return 0;
 }
 
@@ -1358,6 +1541,12 @@ bool ChtP2PCameraCommandHandler::reportStatusEvent(const std::string& camId, con
     if (!m_initialized)
     {
         std::cerr << "CHT P2P服務尚未初始化" << std::endl;
+        return false;
+    }
+
+    if (!checkHiOssStatus())
+    {
+        std::cerr << "Camera does not bind, drop event" << std::endl;
         return false;
     }
 
@@ -1408,7 +1597,7 @@ bool ChtP2PCameraCommandHandler::reportStatusEvent(const std::string& camId, con
             std::cerr << "解析回應JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
             return false;
         }
-        
+
         int rep_result = GetIntMember(responseJson, PAYLOAD_KEY_RESULT);
         if (rep_result != 1) {
             throw std::runtime_error(std::string("reportStatusEvent response result != 1, result=") + std::to_string(rep_result));

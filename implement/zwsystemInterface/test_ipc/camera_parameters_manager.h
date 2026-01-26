@@ -136,7 +136,7 @@ public:
     void setCameraName(const std::string &name);
     void setOsdRule(const std::string &osdRule);
     void setAISettings(const std::string &aiSettings);
-    void setCamSid(const std::string &camSid);
+    void setCamSid(int camSid);
     void setTenantId(const std::string &tenantId);
     void setNetNo(const std::string &netNo);
     void setVsDomain(const std::string &domain);
@@ -145,6 +145,7 @@ public:
     void setDeviceStatus(const std::string &status);
     void setCameraType(const std::string &type);
     void setModel(const std::string &model);
+    void setHiOssStatus(bool value);
     void setIsCheckHioss(bool value);
     void setIsCheckHioss(const std::string &value);
     void setBrand(const std::string &brand);
@@ -158,7 +159,7 @@ public:
     // ===== 基本參數獲取函數 =====
     std::string getCameraId() const;
     std::string getCHTBarcode() const;
-    std::string getCamSid() const;
+    int getCamSid(void) const;
     std::string getTenantId() const;
     std::string getPublicIp() const;
     std::string getCameraName() const;
@@ -166,7 +167,8 @@ public:
     std::string getWifiSsid() const;
 
 
-    std::string getFirmwareVersion() const;
+    std::string getFirmwareVersion(void) const;
+    std::string getLatestFirmwareVersion(void) const;
     std::string getCameraStatus() const;
     long getStorageCapacity() const;
     long getStorageAvailable() const;
@@ -190,7 +192,8 @@ public:
     const std::string &getVsToken() const;
     const std::string &getCameraType() const;
     const std::string &getModel() const;
-    const std::string &getIsCheckHioss() const;
+    bool getHiOssStatus(void) const;
+    bool getIsCheckHioss(void) const;
     const std::string &getBrand() const;
 
     // ===== hamiSettings 相關 getter 函數 =====

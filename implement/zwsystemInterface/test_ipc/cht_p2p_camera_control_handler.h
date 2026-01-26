@@ -13,13 +13,7 @@
 #include <chrono>
 #include <future>
 
-#include <rapidjson/document.h>
-#include <rapidjson/writer.h>
-#include <rapidjson/stringbuffer.h>
-
 #include "cht_p2p_agent_c.h"
-
-#include "camera_parameters_manager.h"
 
 /**
  * @brief CHT P2P Camera控制處理器類
@@ -27,17 +21,15 @@
 class ChtP2PCameraControlHandler
 {
 public:
-    typedef std::function<std::string(ChtP2PCameraControlHandler *self, const std::string &)> ControlHandlerFunc;
+    typedef std::function<std::string(ChtP2PCameraControlHandler *self, const std::string&)> ControlHandlerFunc;
 
     // ===== 單例模式 =====
     static ChtP2PCameraControlHandler &getInstance();
 
     ~ChtP2PCameraControlHandler();
 
-    // ===== 核心處理函數 =====
-    std::string handleControl(CHTP2P_ControlType controlType, const std::string &payload);
-    void registerHandler(CHTP2P_ControlType controlType, ControlHandlerFunc handler);
-    void registerDefaultHandlers();
+    // for menu testing
+    int controlHandleWrapper(CHTP2P_ControlType controlType, const char *payload, std::string& outResult);
 
     // ===== 時區管理函數 =====
     static bool setSystemTimezone(const std::string &tzString);
@@ -49,9 +41,19 @@ public:
     static bool verifyExternalEnvironment(const std::string &expectedTzString);
     static bool createParentShellSolution(const std::string &tzString);
 
+public:
+    // CHT P2P Agent回調處理函數
+    void controlCallback(CHTP2P_ControlType controlType, void *controlHandle, const char *payload, void *userParam);
+
 private:
     ChtP2PCameraControlHandler();
-    std::map<CHTP2P_ControlType, ControlHandlerFunc> m_handlers;
+
+    // ===== 核心處理函數 =====
+    void registerHandler(CHTP2P_ControlType controlType, ControlHandlerFunc handler);
+    void registerDefaultHandlers(void);
+
+    bool checkHiOssStatus(void);
+    int controlHandle(CHTP2P_ControlType controlType, const char *payload, std::string& outResult);
 
     // ===== 基本狀態與管理 =====
     static std::string handleGetCamStatusById(ChtP2PCameraControlHandler *self, const std::string &payload);
@@ -113,6 +115,9 @@ private:
     static std::string handleGetVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload);
     static std::string handleStopVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload);
 #endif
+
+    std::map<CHTP2P_ControlType, ControlHandlerFunc> m_handlers;
+
 };
 
 // ===== 全域輔助函數 =====

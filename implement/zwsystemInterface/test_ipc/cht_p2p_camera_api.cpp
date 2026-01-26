@@ -89,15 +89,19 @@ static void systemEventCallbackWrapper(void *userParam,
     auto *self = static_cast<ChtP2PCameraAPI *>(userParam);
 
     // if event about snapshot, record, recognition, statusEvent
-    self->addSystemEvent(eventType, data, dataSize);
+    uint64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+    self->addSystemEvent(eventType, data, dataSize, now_ms);
 }
 
 void ChtP2PCameraAPI::addSystemEvent(eZwsystemSubSystemEventType eventType,
-        const uint8_t *data, size_t dataSize)
+        const uint8_t *data, size_t dataSize, uint64_t nextRetryMs)
 {
     SystemEvent eventInfo;
     eventInfo.eventType = eventType;
     eventInfo.data.assign(data, data + dataSize);
+    eventInfo.nextRetryMs = nextRetryMs;
 
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -123,6 +127,9 @@ bool ChtP2PCameraAPI::initialize(void)
     //paramsManager.setCHTBarcode(chtBarcode);
     const std::string& camId = paramsManager.getCameraId(); // from /proc/cameraId or random generate
     const std::string& barcode = paramsManager.getCHTBarcode(); // from /proc/chtBarcode
+
+    paramsManager.setIsCheckHioss(false);
+    paramsManager.setHiOssStatus(false);
 
     // 配置CHT P2P Agent
     CHTP2P_Config config;
@@ -225,7 +232,8 @@ void ChtP2PCameraAPI::commandDoneCallback(CHTP2P_CommandType type, void *handle,
 void ChtP2PCameraAPI::controlCallback(CHTP2P_ControlType type, void *handle,
         const char *payload, void *userParam)
 {
-
+    auto &ctrlhandler = ChtP2PCameraControlHandler::getInstance();
+    ctrlhandler.controlCallback(type, handle, payload, nullptr);
 }
 
 void ChtP2PCameraAPI::audioCallback(const char *data, size_t dataSize, const char *metadata, void *userParam)
@@ -245,27 +253,48 @@ void ChtP2PCameraAPI::eventWorkerThread(void)
 
     while (!isEventWorkerStopping()) {
         std::unique_lock<std::mutex> lock(m_queueMutex);
-        
+
         // 等待事件，或在 m_workerRunning 變為 false 時醒來
         m_queueCV.wait(lock, [this] { return !m_eventQueue.empty() || !m_eventWorkerStopping; });
-        
+
         if (!m_eventWorkerStopping) {
             break;
         }
-        
+
         if (m_eventQueue.empty()) {
             continue;
         }
-        
+
         SystemEvent event = m_eventQueue.front();
         m_eventQueue.pop();
+
+        // update queue in local file
+        // remove this event local file
+        // add all event in queue into local
+
         lock.unlock();
-        
+
         // 在隊列鎖外處理事件
         processSystemEvent(event);
     }
 
     printApiDebug("eventWorkerThread is stopped");
+}
+
+static int dispatchEvent(ChtP2PCameraCommandHandler& handler,
+        eZwsystemSubSystemEventType t, const uint8_t *data, size_t dataSize)
+{
+    switch (t) {
+        case eSystemEventType_Snapshot:    return handler.reportSnapshot(data, dataSize);
+        case eSystemEventType_Record:      return handler.reportRecord(data, dataSize);
+        case eSystemEventType_Recognition: return handler.reportRecognition(data, dataSize);
+        case eSystemEventType_StatusEvent: return handler.reportStatusEvent(data, dataSize);
+        default:
+            printApiDebug("Unknown system event type received");
+            break;
+    }
+
+    return 0;
 }
 
 void ChtP2PCameraAPI::processSystemEvent(const SystemEvent& event)
@@ -275,42 +304,20 @@ void ChtP2PCameraAPI::processSystemEvent(const SystemEvent& event)
     eZwsystemSubSystemEventType eventType = event.eventType;
     const uint8_t *data = event.data.data();
     size_t dataSize = event.data.size();
-    
+
     // if event about snapshot/record/recognition/statusEvent, call command handler to process by function
     auto &cmdhandler = ChtP2PCameraCommandHandler::getInstance();
-    if (eventType == eSystemEventType_Snapshot) {
-        int res = cmdhandler.reportSnapshot(data, dataSize);
-        if (res != 0) {
-            printApiDebug("reportSnapshot failed, res=" + std::to_string(res));
-            // maybe let this event retry later?
-            // and save to local storage?
-            // next time when camera boots up, resend these failed events
-        }
-    } else if (eventType == eSystemEventType_Record) {
-        int res = cmdhandler.reportRecord(data, dataSize);
-        if (res != 0) {
-            printApiDebug("reportRecord failed, res=" + std::to_string(res));
-            // maybe let this event retry later?
-            // and save to local storage?
-            // next time when camera boots up, resend these failed events
-        }
-    } else if (eventType == eSystemEventType_Recognition) {
-        int res = cmdhandler.reportRecognition(data, dataSize);
-        if (res != 0) {
-            printApiDebug("reportRecognition failed, res=" + std::to_string(res));
-            // maybe let this event retry later?
-            // and save to local storage?
-            // next time when camera boots up, resend these failed events
-        }
-    } else if (eventType == eSystemEventType_StatusEvent) {
-        int res = cmdhandler.reportStatusEvent(data, dataSize);
-        if (res != 0) {
-            printApiDebug("reportStatusEvent failed, res=" + std::to_string(res));
-            // maybe let this event retry later?
-            // and save to local storage?
-            // next time when camera boots up, resend these failed events
-        }
-    } else {
-        printApiDebug("Unknown system event type received");
-    }
+    int rc = dispatchEvent(cmdhandler, eventType, data, dataSize);
+    if (rc == 0 || rc == REPORT_EVENT_NOT_RETRY) return ;
+
+    printApiDebug("dispatchEvent failed, rc=" + std::to_string(rc));
+
+    // maybe let this event retry later?
+    // and save to local storage?
+    // next time when camera boots up, resend these failed events
+    uint64_t next_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+    next_ms += 300000ull;
+    addSystemEvent(eventType, data, dataSize, next_ms);
 }

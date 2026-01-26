@@ -68,12 +68,16 @@ public:
     int getHamiCameraInitialInfo(void);
 
     void addSystemEvent(eZwsystemSubSystemEventType eventType,
-            const uint8_t *data, size_t dataSize);
+            const uint8_t *data, size_t dataSize, uint64_t nextRetryMs);
 
 private:
     struct SystemEvent {
+        uint64_t id; // random id;
         eZwsystemSubSystemEventType eventType;
         std::vector<uint8_t> data;
+        uint64_t nextRetryMs; // epoch ms
+
+        SystemEvent() : id{0} {};
     };
 
     void eventWorkerThread(void);

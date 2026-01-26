@@ -32,8 +32,6 @@ extern int zwsystem_ipc_getCamStatusById(stCamStatusByIdReq stReq, stCamStatusBy
 extern int zwsystem_ipc_deleteCameraInfo(stDeleteCameraInfoReq stReq, stDeleteCameraInfoRep *pRep);
 extern int zwsystem_ipc_setTimezone(stSetTimezoneReq stReq, stSetTimezoneRep *pRep);
 extern int zwsystem_ipc_getTimezone(stGetTimezoneReq stReq, stGetTimezoneRep *pRep);
-extern int zwsystem_ipc_getDateTimeInfo(stDateTimeInfoReq stReq, stDateTimeInfoRep *pRep);
-extern int zwsystem_ipc_setDateTimeInfo(stDateTimeInfoReq stReq, stDateTimeInfoRep *pRep);
 extern int zwsystem_ipc_updateCameraName(stUpdateCameraNameReq stReq, stUpdateCameraNameRep *pRep);
 extern int zwsystem_ipc_setCameraOsd(stSetCameraOsdReq stReq, stSetCameraOsdRep *pRep);
 extern int zwsystem_ipc_setCameraHd(stSetCameraHdReq stReq, stSetCameraHdRep *pRep);
