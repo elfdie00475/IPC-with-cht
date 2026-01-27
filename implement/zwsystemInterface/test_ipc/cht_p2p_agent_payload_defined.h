@@ -70,7 +70,7 @@ extern "C"
 #define PAYLOAD_KEY_AUTO_NIGHT_VISION "autoNightVision" /**string*/           /**自動夜晚模式 1:開啟 0:關閉*/
 #define PAYLOAD_KEY_IS_FLIP_UP_DOWN "isFlipUpDown" /**string*/                /**上下翻轉 1:開啟 0:關閉*/
 #define PAYLOAD_KEY_STATUS_INDICATOR_LIGHT "statusIndicatorLight" /**string*/ /**狀態指示燈 1:開啟 0:關閉*/
-// #define PAYLOAD_KEY_CAMERA "Camera" /**string*/                               /**1:開啟 0:關閉*/
+#define PAYLOAD_KEY_CAMERA "Camera" /**string*/                               /**1:開啟 0:關閉*/
 
 // ===== 時區設定 =====
 #define PAYLOAD_KEY_TIMEZONE "timezone" /**string*/              /**tid 值，不可為空值*/

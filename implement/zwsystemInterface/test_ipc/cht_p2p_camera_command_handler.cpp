@@ -881,13 +881,21 @@ bool ChtP2PCameraCommandHandler::getHamiCamInitialInfo(const std::string& camId,
                 rep_verifyLevel = rewriteIntParam(rep_verifyLevel, 1, 2, true, 2);
 
                 const rapidjson::Value& rep_faceFeaturesBlob = GetObjectMember(featureObj, PAYLOAD_KEY_FACE_FEATURES);
-                if (rep_faceFeaturesBlob.IsString()) {
-                    const char *blobData = rep_faceFeaturesBlob.GetString();
-                    rapidjson::SizeType blobSize = rep_faceFeaturesBlob.GetStringLength();
+                if (rep_faceFeaturesBlob.IsArray()) {
+                    const auto& blobData = rep_faceFeaturesBlob.GetArray();
+                    rapidjson::SizeType blobSize = rep_faceFeaturesBlob.Size();
                     if (blobSize != ZWSYSTEM_FACE_FEATURES_SIZE) {
                         throw std::runtime_error("Invalid face features blob size");
                     }
-                    memcpy(feature->faceFeatures, blobData, blobSize);
+                    rapidjson::SizeType j = 0;
+                    for (j = 0; j < blobSize; j++) {
+                        if (!blobData[j].IsUint() || blobData[j].GetUint() > 255) {
+                            throw std::runtime_error("Invalid face features blob value");
+                        }
+                        feature->faceFeatures[j] = static_cast<uint8_t>(blobData[j].GetUint());
+                    }
+                } else {
+                    throw std::runtime_error("Invalid face features blob type");
                 }
 
                 const std::string& rep_createTime = GetStringMember(featureObj, PAYLOAD_KEY_CREATE_TIME);

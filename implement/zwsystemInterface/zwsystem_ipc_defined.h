@@ -57,22 +57,34 @@ typedef enum zwsystem_ipc_command_e {
     _SetFlipUpDown,                /**更新上下翻轉180翻轉*/
     _SetLED,                       /**更新LED指示燈*/
     _SetCameraPower,               /**攝影機關閉*/
-    _GetSnapshotHamiCamDevice,     /**取得攝影機快照(非同步)*/
-    _RestartHamiCamDevice,         /**攝影機重新開機*/
+    //_GetSnapshotHamiCamDevice,     /**取得攝影機快照(非同步)*/
+    _QuarySnapshot,                /**取得攝影機快照(非同步)*/
+    //_RestartHamiCamDevice,         /**攝影機重新開機*/
+    _Reboot,                       /**攝影機重新開機*/
     _SetCamStorageDay,             /**更新雲存天數*/
-    _SetCamEventStorageDay,       /**更新事件雲存天數*/
-    _HamiCamFormatSDCard,          /**攝影機SD卡格式化*/
-    _HamiCamPtzControlMove,        /**PTZ控制*/
-    _HamiCamPtzControlConfigSpeed, /**PTZ設定擺頭速度*/
-    _HamiCamGetPtzControl,         /**取得PTZ設定與狀態資訊*/
-    _HamiCamPtzControlTourGo,      /**PTZ巡航模式*/
-    _HamiCamPtzControlGoPst,       /**PTZ移動到設定點*/
-    _HamiCamPtzControlConfigPst,   /**PTZ設定點*/
+    _SetCamEventStorageDay,        /**更新事件雲存天數*/
+    //_HamiCamFormatSDCard,          /**攝影機SD卡格式化*/
+    _FormatSDCard,                 /**攝影機SD卡格式化*/
+    //_HamiCamPtzControlMove,        /**PTZ控制*/
+    //_HamiCamPtzControlConfigSpeed, /**PTZ設定擺頭速度*/
+    //_HamiCamGetPtzControl,         /**取得PTZ設定與狀態資訊*/
+    //_HamiCamPtzControlTourGo,      /**PTZ巡航模式*/
+    //_HamiCamPtzControlGoPst,       /**PTZ移動到設定點*/
+    //_HamiCamPtzControlConfigPst,   /**PTZ設定點*/
+    _PtzControlMove,               /**PTZ控制*/
+    _PtzControlSpeed,              /**PTZ設定擺頭速度*/
+    _PtzGetControl,                /**取得PTZ設定與狀態資訊*/
+    _PtzControlTourGo,             /**PTZ巡航模式*/
+    _PtzControlGoPst,              /**PTZ移動到設定點*/
+    _PtzSetPresetPoint,            /**PTZ設定點*/
     _HamiCamHumanTracking,         /**PTZ人類追蹤*/
     _HamiCamPetTracking,           /**PTZ寵物追蹤*/
-    _GetHamiCamBindList,           /**取得wifi密碼*/
-    _UpgradeHamiCamOTA,            /**更新OTA*/
-    _UpdateCameraAISetting,        /**更新攝影機AI設定資訊*/
+    //_GetHamiCamBindList,           /**取得wifi密碼*/
+    _GetCameraBindWifiInfo,        /**取得wifi密碼*/
+    //_UpgradeHamiCamOTA,            /**更新OTA*/
+    _UpgradeCameraOTA,             /**更新OTA*/
+    //_UpdateCameraAISetting,        /**更新攝影機AI設定資訊*/
+    _SetCameraAISetting,           /**更新攝影機AI設定資訊*/
     _GetCameraAISetting,           /**取得攝影機AI設定資訊*/
     _GetVideoLiveStream,           /**取得即時影音RTP串流*/
     _StopVideoLiveStream,          /**停止即時影音RTP串流*/
@@ -148,14 +160,14 @@ typedef struct zwsystem_sub_msg_st {
     uint8_t *pu8Payload;
 } stZwsystemSubMsg;
 
-static inline void zwsystem_sub_msg_init(stZwsystemSubMsg *m, 
+static inline void zwsystem_sub_msg_init(stZwsystemSubMsg *m,
     const char *eventPrefix, uint16_t u16MsgId, uint16_t u16CmdType)
 {
     if (!m || !eventPrefix) return;
-    
+
     // 設置 Subscribe Prefix (用於 nng 的 prefix 匹配)
     memcpy(m->stSubHdr.u8eventPrefix, eventPrefix, ZWSYSTEM_SUBSCRIBE_PREFIX_LEN);
-    
+
     // 初始化 IPC Header
     m->stHdr.u32FourCC = ZWSYSTEM_IPC_FOURCC;
     m->stHdr.u16Headers[0] = u16MsgId;

@@ -297,6 +297,7 @@ typedef struct identification_feature_st {
 } stIdentificationFeature;
 
 typedef enum hami_ai_setting_update_mask {
+    eAiSettingUpdateMask_Empty          = 0,
     eAiSettingUpdateMask_VmdAlert       = (1u << 0),
     eAiSettingUpdateMask_HumanAlert     = (1u << 1),
     eAiSettingUpdateMask_PetAlert       = (1u << 2),
@@ -329,6 +330,7 @@ typedef enum hami_ai_setting_update_mask {
 } eAiSettingUpdateMaskBit;
 
 typedef enum fence_pos_update_mask {
+    eFencePosUpdateMask_Empty          = 0,
     eFencePosUpdateMask_FencePos_1     = (1u << 1),
     eFencePosUpdateMask_FencePos_2     = (1u << 2),
     eFencePosUpdateMask_FencePos_3     = (1u << 3),
@@ -337,8 +339,8 @@ typedef enum fence_pos_update_mask {
 } eFencePosUpdateMaskBit;
 
 typedef struct hami_ai_setting_st {
-    eAiSettingUpdateMaskBit updateBit; // eAiSettingUpdateMaskBit
-    eFencePosUpdateMaskBit fencePosUpdateBit; // eFencePosUpdateMaskBit
+    uint32_t updateBit; // eAiSettingUpdateMaskBit
+    uint32_t fencePosUpdateBit; // eFencePosUpdateMaskBit
     bool vmdAlert;
     bool humanAlert;
     bool petAlert;
@@ -366,6 +368,7 @@ typedef struct hami_ai_setting_st {
     int fallTime;
     uint32_t featuresObjSize;
     stIdentificationFeature features[ZWSYSTEM_FACE_FEATURES_ARRAY_SIZE];
+    uint32_t fencePosSize;
     stPosition fencePos[ZWSYSTEM_FENCE_POSITION_SIZE];
     eFenceDirection fenceDir;
 } stHamiAiSetting;
@@ -432,7 +435,7 @@ typedef enum datetime_update_mask {
 typedef struct datetime_info_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    eDatetimeUpdateMaskBit updateBit; // for request
+    uint32_t updateBit; // eDatetimeUpdateMaskBit for request
     // about timezone
     bool daylightSavings;
     char TZStr[ZWSYSTEM_IPC_STRING_SIZE];
@@ -480,16 +483,10 @@ typedef struct set_camera_HD_rep_st {
 } stSetCameraHdRep;
 
 typedef struct set_flicker_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     eFlickerMode flicker;
 } stSetFlickerReq;
 
-typedef struct set_flicker_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    eFlickerMode flicker;
-} stSetFlickerRep;
+typedef stDefault stSetFlickerRep;
 
 typedef struct set_image_quality_req_st {
     char camId[ZWSYSTEM_IPC_STRING_SIZE];
@@ -506,105 +503,49 @@ typedef struct set_image_quality_rep_st {
 } stSetImageQualityRep;
 
 typedef struct set_microphone_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     uint32_t microphoneSensitivity; // 0~10
 } stSetMicrophoneReq;
 
-typedef struct set_microphone_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    uint32_t microphoneSensitivity; // 0~10
-} stSetMicrophoneRep;
+typedef stDefault stSetMicrophoneRep;
 
 typedef struct set_night_mode_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     bool nightMode;
 } stSetNightModeReq;
 
-typedef struct set_night_mode_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    bool nightMode;
-} stSetNightModeRep;
+typedef stDefault stSetNightModeRep;
 
 typedef struct set_auto_night_vision_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     bool autoNightVision;
 } stSetAutoNightVisionReq;
 
-typedef struct set_auto_night_vision_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    bool autoNightVision;
-} stSetAutoNightVisionRep;
+typedef stDefault stSetAutoNightVisionRep;
 
 typedef struct set_speaker_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     uint32_t speakerVolume; // 0~10
 } stSetSpeakerReq;
 
-typedef struct set_speaker_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    uint32_t speakerVolume; // 0~10
-} stSetSpeakerRep;
+typedef stDefault stSetSpeakerRep;
 
 typedef struct set_flip_updown_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     bool isFlipUpDown;
 } stSetFlipUpDownReq;
 
-typedef struct set_flip_updown_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    bool isFlipUpDown;
-} stSetFlipUpDownRep;
+typedef stDefault stSetFlipUpDownRep;
 
 typedef struct set_LED_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     bool statusIndicatorLight;
 } stSetLedReq;
 
-typedef struct set_LED_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    bool statusIndicatorLight;
-} stSetLedRep;
+typedef stDefault stSetLedRep;
 
 typedef struct set_camera_power_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     bool cameraPower;
 } stSetCameraPowerReq;
 
-typedef struct set_camera_power_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    bool cameraPower;
-} stSetCameraPowerRep;
+typedef stDefault stSetCameraPowerRep;
 
-typedef struct snapshot_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    char eventId[ZWSYSTEM_IPC_STRING_SIZE];
-    char snapshotTime[ZWSYSTEM_IPC_STRING_SIZE];
-    char filePath[ZWSYSTEM_IPC_STRING_SIZE];
-} stSnapshotReq;
-
-typedef struct snapshot_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    char eventId[ZWSYSTEM_IPC_STRING_SIZE];
-    char snapshotTime[ZWSYSTEM_IPC_STRING_SIZE];
-    char filePath[ZWSYSTEM_IPC_STRING_SIZE];
-} stSnapshotRep;
+typedef stDefault stSnapshotReq;
+typedef stDefault stSnapshotRep;
 
 typedef struct snapshot_event_sub_st {
     char eventId[ZWSYSTEM_IPC_STRING_SIZE];
@@ -612,52 +553,35 @@ typedef struct snapshot_event_sub_st {
     char filePath[ZWSYSTEM_IPC_STRING_SIZE];
 } stSnapshotEventSub;
 
-typedef struct reboot_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-} stRebootReq;
-
-typedef struct reboot_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-} stRebootRep;
+typedef stDefault stRebootReq;
+typedef stDefault stRebootRep;
 
 typedef struct set_storage_day_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     uint32_t storageDay;
 } stSetStorageDayReq;
 
-typedef struct set_storage_day_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    uint32_t storageDay;
-} stSetStorageDayRep;
+typedef stDefault stSetStorageDayRep;
 
-typedef struct set_event_storage_day_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    uint32_t eventStorageDay;
-} stSetEventStorageDayReq;
+typedef stDefault stFormatSdCardReq;
+typedef stDefault stFormatSdCardRep;
 
-typedef struct set_event_storage_day_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    uint32_t eventStorageDay;
-} stSetEventStorageDayRep;
+typedef enum ptz_control_move_type {
+    ePtzControlMove_Stop = 0,
+    ePtzControlMove_Left,
+    ePtzControlMove_Right,
+    ePtzControlMove_Up,
+    ePtzControlMove_Down,
+    ePtzControlMove_Pan,
+    ePtzControlMove_Home
+} ePtzControlMoveType;
 
-typedef struct format_sd_card_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-} stFormatSdCardReq;
+typedef struct ptz_control_move_req_st {
+    ePtzControlMoveType moveCmd;
+} stPtzControlMoveReq;
 
-typedef struct format_sd_card_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-} stFormatSdCardRep;
+typedef stDefault stPtzControlMoveRep;
 
 typedef struct ptz_move_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char cmd[ZWSYSTEM_IPC_STRING_SIZE];
     float move_x;
     float move_y;
@@ -668,32 +592,19 @@ typedef struct ptz_move_req_st {
     bool home;
 } stPtzMoveReq;
 
-typedef struct ptz_move_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-} stPtzMoveRep;
+typedef stDefault stPtzMoveRep;
 
 typedef struct set_ptz_speed_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     float ptzSpeed;
 } stSetPtzSpeedReq;
 
-typedef struct set_ptz_speed_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    float ptzSpeed;
-} stSetPtzSpeedRep;
+typedef stDefault stSetPtzSpeedRep;
 
-typedef struct get_ptz_status_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-} stGetPtzStatusReq;
+typedef stDefault stGetPtzStatusReq;
 
 typedef struct get_ptz_status_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
     uint32_t ptzTourStayTime;
     float ptzSpeed;
     ePtzTrackingMode humanTracking;
@@ -703,74 +614,46 @@ typedef struct get_ptz_status_rep_st {
 } stGetPtzStatusRep;
 
 typedef struct ptz_tour_go_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char indexSequence[ZWSYSTEM_IPC_STRING_SIZE];
 } stPtzTourGoReq;
 
-typedef struct ptz_tour_go_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-} stPtzTourGoRep;
+typedef stDefault stPtzTourGoRep;
 
 typedef struct ptz_go_preset_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     uint32_t index; // 1~4
 } stPtzGoPresetReq;
 
-typedef struct ptz_go_preset_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    uint32_t index; // 1~4
-} stPtzGoPresetRep;
+typedef stDefault stPtzGoPresetRep;
 
 typedef struct ptz_set_preset_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     uint32_t index; // 1~4
     bool remove;
     char presetName[ZWSYSTEM_IPC_STRING_SIZE];
 } stPtzSetPresetReq;
 
-typedef struct ptz_set_preset_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    uint32_t index; // 1~4
-    bool remove;
-    char presetName[ZWSYSTEM_IPC_STRING_SIZE];
-} stPtzSetPresetRep;
+typedef stDefault stPtzSetPresetRep;
 
 typedef struct ptz_set_tracking_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     ePtzTrackingMode val;
 } stPtzSetTrackingReq;
 
-typedef struct ptz_set_tracking_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    ePtzTrackingMode val;
-} stPtzSetTrackingRep;
+typedef stDefault stPtzSetTrackingRep;
 
 typedef stDefault stSetPtzHomeReq;
 
 typedef struct set_ptz_home_rep_st {
-    int result;
+    int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
 } stSetPtzHomeRep;
 
-typedef struct get_camera_bind_list_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-} stGetCameraBindListReq;
+typedef stDefault stGetCameraBindWifiInfoReq;
 
-typedef struct get_camera_bind_list_rep_st {
+typedef struct get_camera_bind_wifi_info_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
     char wifiSsid[ZWSYSTEM_IPC_STRING_SIZE];
     char password[ZWSYSTEM_IPC_STRING_SIZE]; // base64
-} stGetCameraBindListRep;
+} stGetCameraBindWifiInfoRep;
 
 typedef enum ota_upgrade_mode {
     eUpgradeMode_Immediately,
@@ -778,28 +661,20 @@ typedef enum ota_upgrade_mode {
 } eOtaUpgradeMode;
 
 typedef struct upgrade_camera_OTA_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     eOtaUpgradeMode upgradeMode;
     char filePath[ZWSYSTEM_IPC_STRING_SIZE];
 } stUpgradeCameraOtaReq;
 
-typedef struct upgrade_camera_OTA_rep_st {
+typedef stDefault stUpgradeCameraOtaRep;
+
+typedef struct camera_ai_setting_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-} stUpgradeCameraOtaRep;
-
-typedef struct camera_ai_setting_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     stHamiAiSetting aiSetting;
-} stCameraAiSettingReq;
+} stCameraAiSetting;
 
-typedef struct camera_ai_setting_rep_st {
-    int code;
-    char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
-    stHamiAiSetting aiSetting;
-} stCameraAiSettingRep;
+typedef stCameraAiSetting stCameraAiSettingReq;
+typedef stCameraAiSetting stCameraAiSettingRep;
 
 typedef struct record_event_req_st {
     char camId[ZWSYSTEM_IPC_STRING_SIZE];

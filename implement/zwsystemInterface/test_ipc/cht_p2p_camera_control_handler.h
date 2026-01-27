@@ -28,8 +28,9 @@ public:
 
     ~ChtP2PCameraControlHandler();
 
-    // for menu testing
+#ifdef SIMULATION_MODE
     int controlHandleWrapper(CHTP2P_ControlType controlType, const char *payload, std::string& outResult);
+#endif
 
     // ===== 時區管理函數 =====
     static bool setSystemTimezone(const std::string &tzString);

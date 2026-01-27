@@ -216,50 +216,6 @@ std::string base64_encode(const std::string &input)
         encoded.push_back('=');
     return encoded;
 }
-// 檢查韌體檔案是否有效
-bool validateFirmwareFile(const std::string &filePath)
-{
-    try
-    {
-        struct stat fileStat;
-
-        // 檢查檔案是否存在
-        if (stat(filePath.c_str(), &fileStat) != 0)
-        {
-            std::cerr << "ERROR: 韌體檔案不存在: " << filePath << std::endl;
-            return false;
-        }
-
-        // 檢查是否為一般檔案
-        if (!S_ISREG(fileStat.st_mode))
-        {
-            std::cerr << "ERROR: 路徑不是一般檔案: " << filePath << std::endl;
-            return false;
-        }
-
-        // 檢查檔案大小（韌體檔案應該有一定大小）
-        if (fileStat.st_size < 1024)
-        { // 小於 1KB 可能有問題
-            std::cerr << "ERROR: 韌體檔案大小異常: " << fileStat.st_size << " bytes" << std::endl;
-            return false;
-        }
-
-        // 檢查檔案是否可讀
-        if (access(filePath.c_str(), R_OK) != 0)
-        {
-            std::cerr << "ERROR: 韌體檔案無法讀取: " << filePath << std::endl;
-            return false;
-        }
-
-        std::cout << "INFO: 韌體檔案驗證通過 - 大小: " << fileStat.st_size << " bytes" << std::endl;
-        return true;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "ERROR: 驗證韌體檔案時發生例外: " << e.what() << std::endl;
-        return false;
-    }
-}
 
 // 讀取 WiFi 設定
 bool readWifiConfig(std::string &ssid, std::string &password)
@@ -357,11 +313,12 @@ void ChtP2PCameraControlHandler::controlCallback(CHTP2P_ControlType controlType,
     }
 }
 
-// for menu testing
+#ifdef SIMULATION_MODE
 int ChtP2PCameraControlHandler::controlHandleWrapper(CHTP2P_ControlType controlType, const char *payload, std::string& outResult)
 {
     return controlHandle(controlType, payload, outResult);
 }
+#endif
 
 static void AddString(rapidjson::Document& doc, const char* key, const std::string& val)
 {
@@ -1109,7 +1066,7 @@ std::string ChtP2PCameraControlHandler::handleUpdateCameraName(ChtP2PCameraContr
             throw std::runtime_error("name maybe empty or too long");
         }
         if (!is_valid_utf8(name.c_str(), name.size())) {
-            throw std::runtime_error("name string format invalid");
+            throw std::runtime_error("name string format is invalid");
         }
 
         stUpdateCameraNameReq stReq;
@@ -1329,11 +1286,13 @@ std::string ChtP2PCameraControlHandler::handleSetCameraOSD(ChtP2PCameraControlHa
         const std::string& osdRule = GetStringMember(requestJson, PAYLOAD_KEY_OSD_RULE);
         std::cout << "解析成功 - osdRule: " << osdRule << std::endl;
 
-        if (osdRule.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
-            throw std::runtime_error("name maybe empty or too long");
+        if (osdRule.size() >= ZWSYSTEM_IPC_STRING_SIZE)
+        {
+            throw std::runtime_error("OsdRule is too long");
         }
-        if (!is_valid_utf8(osdRule.c_str(), osdRule.size())) {
-            throw std::runtime_error("name string format invalid");
+        if (!is_valid_utf8(osdRule.c_str(), osdRule.size()))
+        {
+            throw std::runtime_error("OsdRule string format is invalid");
         }
 
         stSetCameraOsdReq stReq;
@@ -1376,7 +1335,7 @@ std::string ChtP2PCameraControlHandler::handleSetCameraOSD(ChtP2PCameraControlHa
 static bool isValidRequestId(const std::string& requestId)
 {
     // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
-    std::regex requestIdPattern("^(UDP|Relay)_live_.+_.+$");
+    static const std::regex requestIdPattern("^(UDP|Relay)_live_.+_.+$");
     return std::regex_match(requestId, requestIdPattern);
 }
 
@@ -1428,6 +1387,7 @@ std::string ChtP2PCameraControlHandler::handleSetCameraHD(ChtP2PCameraControlHan
         // maybe set into profile for
 
         // 更新HD設定到參數管理器
+        // maybe update to streamer
         paramsManager.setRequestId(requestId);
         paramsManager.setIsHd(isHd);
 
@@ -1441,7 +1401,7 @@ std::string ChtP2PCameraControlHandler::handleSetCameraHD(ChtP2PCameraControlHan
         rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
 
         response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定攝影機OSD");
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定HD");
         AddString(response, PAYLOAD_KEY_REQUEST_ID, requestId);
         AddString(response, PAYLOAD_KEY_IS_HD, isHd);
 
@@ -1461,6 +1421,2367 @@ std::string ChtP2PCameraControlHandler::handleSetCameraHD(ChtP2PCameraControlHan
 
         return outResult;
     }
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetFlicker(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定閃爍率: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& flicker = GetStringMember(requestJson, PAYLOAD_KEY_FLICKER);
+        std::cout << "設定閃爍率 - flicker: " << flicker << std::endl;
+
+        stSetFlickerReq stReq;
+        stSetFlickerRep stRep;
+
+        // 驗證flicker參數
+        if (flicker == "0") {
+            stReq.flicker = eFlicker_50Hz;
+        } else if (flicker == "1") {
+            stReq.flicker = eFlicker_60Hz;
+        } else if (flicker == "2") {
+            stReq.flicker = eFlicker_Outdoor;
+        } else {
+            throw std::runtime_error("無效的flicker參數，必須為0(50Hz)、1(60Hz)或2(戶外)");
+        }
+        int rc = zwsystem_ipc_setFlicker(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定閃爍率");
+        AddString(response, PAYLOAD_KEY_FLICKER, flicker);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定閃爍率時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定閃爍率時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetImageQuality(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定影像品質: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+        const std::string& imageQuality = GetStringMember(requestJson, PAYLOAD_KEY_IMAGE_QUALITY);
+
+        // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
+        if (!isValidRequestId(requestId))
+        {
+            std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
+            throw std::runtime_error("requestId格式錯誤");
+        }
+
+        // 驗證imageQuality參數
+        if (imageQuality != "0" && imageQuality != "1" && imageQuality != "2")
+        {
+            throw std::runtime_error("無效的imageQuality參數，必須為0(Low)、1(Middle)或2(High)");
+        }
+
+        std::cout << "設定影像品質 - "
+                  << ", requestId: " << requestId
+                  << ", imageQuality: " << imageQuality << std::endl;
+
+        // 更新影像品質設定到參數管理器
+        // maybe update to streamer
+        paramsManager.setRequestId(requestId);
+        paramsManager.setImageQuality(imageQuality);
+
+        // 保存設定到檔案
+        bool saveResult = paramsManager.saveToFile();
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定影像品質");
+        AddString(response, PAYLOAD_KEY_REQUEST_ID, requestId);
+        AddString(response, PAYLOAD_KEY_IMAGE_QUALITY, imageQuality);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定影像品質時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定影像品質時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+static int jsonStr2int(const char *key, const std::string& value)
+{
+    try
+    {
+        return std::stoi(value);
+    }
+    catch (const std::invalid_argument &)
+    {
+        throw std::runtime_error(std::string("The value can't convert to integer, Key = ") + std::string(key));
+    }
+
+    return -1;
+}
+
+std::string ChtP2PCameraControlHandler::handleSetMicrophone(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定麥克風: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& microphoneSensitivity = GetStringMember(requestJson, PAYLOAD_KEY_MICROPHONE_SENSITIVITY);
+
+        // 驗證microphoneSensitivity參數（0~10）
+        int sensitivity = jsonStr2int(PAYLOAD_KEY_MICROPHONE_SENSITIVITY, microphoneSensitivity);
+        if (sensitivity < 0 || sensitivity > 10)
+        {
+            throw std::runtime_error("無效的microphoneSensitivity參數，必須為0~10之間");
+        }
+
+        std::cout << "設定麥克風 - microphoneSensitivity: " << std::to_string(sensitivity) << std::endl;
+
+        stSetMicrophoneReq stReq;
+        stSetMicrophoneRep stRep;
+
+        stReq.microphoneSensitivity = sensitivity;
+        int rc = zwsystem_ipc_setMicrophone(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定麥克風");
+        AddString(response, PAYLOAD_KEY_MICROPHONE_SENSITIVITY, microphoneSensitivity);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定麥克風時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定麥克風時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+
+std::string ChtP2PCameraControlHandler::handleSetNightMode(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定夜間模式: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& nightMode = GetStringMember(requestJson, PAYLOAD_KEY_NIGHT_MODE);
+        std::cout << "設定夜間模式 - nightMode: " << nightMode << std::endl;
+
+        stSetNightModeReq stReq;
+        stSetNightModeRep stRep;
+
+        // 驗證nightMode參數
+        if (nightMode == "0") {
+            stReq.nightMode = false;
+        } else if (nightMode == "1") {
+            stReq.nightMode = true;
+        } else {
+            throw std::runtime_error("無效的nightMode參數，必須為0(關閉)或1(開啟)");
+        }
+        int rc = zwsystem_ipc_setNightMode(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定夜間模式");
+        AddString(response, PAYLOAD_KEY_NIGHT_MODE, nightMode);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定夜間模式時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定夜間模式時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetAutoNightVision(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定自動夜視: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& autoNightVision = GetStringMember(requestJson, PAYLOAD_KEY_AUTO_NIGHT_VISION);
+        std::cout << "設定自動夜視 - autoNightVision: " << autoNightVision << std::endl;
+
+        stSetAutoNightVisionReq stReq;
+        stSetAutoNightVisionRep stRep;
+
+        // 驗證nightMode參數
+        if (autoNightVision == "0") {
+            stReq.autoNightVision = false;
+        } else if (autoNightVision == "1") {
+            stReq.autoNightVision = true;
+        } else {
+            throw std::runtime_error("無效的autoNightVision參數，必須為0(關閉)或1(開啟)");
+        }
+        int rc = zwsystem_ipc_setAutoNightVision(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定自動夜視");
+        AddString(response, PAYLOAD_KEY_AUTO_NIGHT_VISION, autoNightVision);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定自動夜視時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定自動夜視時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetSpeak(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定揚聲器: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& speakVolume = GetStringMember(requestJson, PAYLOAD_KEY_SPEAK_VOLUME);
+        std::cout << "設定揚聲器 - speakVolume: " << speakVolume << std::endl;
+
+        int volume = jsonStr2int(PAYLOAD_KEY_SPEAK_VOLUME, speakVolume);
+        if (volume < 0 || volume > 10)
+        {
+            throw std::runtime_error("無效的speakVolume參數，必須為0~10之間");
+        }
+
+        stSetSpeakerReq stReq;
+        stSetSpeakerRep stRep;
+
+        stReq.speakerVolume = volume;
+        int rc = zwsystem_ipc_setSpeaker(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定揚聲器");
+        //AddString(response, PAYLOAD_KEY_SPEAK_VOLUME, speakVolume);
+        response.AddMember(PAYLOAD_KEY_SPEAK_VOLUME, volume, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定揚聲器時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定揚聲器時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetFlipUpDown(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定上下翻轉: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& isFlipUpDown = GetStringMember(requestJson, PAYLOAD_KEY_IS_FLIP_UP_DOWN);
+        std::cout << "設定上下翻轉 - isFlipUpDown: " << isFlipUpDown << std::endl;
+
+        stSetFlipUpDownReq stReq;
+        stSetFlipUpDownRep stRep;
+
+        // 驗證nightMode參數
+        if (isFlipUpDown == "0") {
+            stReq.isFlipUpDown = false;
+        } else if (isFlipUpDown == "1") {
+            stReq.isFlipUpDown = true;
+        } else {
+            throw std::runtime_error("無效的isFlipUpDown參數，必須為0(關閉)或1(開啟)");
+        }
+        int rc = zwsystem_ipc_setFlipUpDown(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定上下翻轉");
+        AddString(response, PAYLOAD_KEY_IS_FLIP_UP_DOWN, isFlipUpDown);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定上下翻轉時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定上下翻轉時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetLED(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定LED指示燈: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& statusIndicatorLight = GetStringMember(requestJson, PAYLOAD_KEY_STATUS_INDICATOR_LIGHT);
+        std::cout << "設定LED指示燈 - statusIndicatorLight: " << statusIndicatorLight << std::endl;
+
+        stSetLedReq stReq;
+        stSetLedRep stRep;
+
+        // 驗證statusIndicatorLight參數
+        if (statusIndicatorLight == "0") {
+            stReq.statusIndicatorLight = false;
+        } else if (statusIndicatorLight == "1") {
+            stReq.statusIndicatorLight = true;
+        } else {
+            throw std::runtime_error("無效的statusIndicatorLight參數，必須為0(關閉)或1(開啟)");
+        }
+        int rc = zwsystem_ipc_setLed(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定LED指示燈");
+        AddString(response, PAYLOAD_KEY_STATUS_INDICATOR_LIGHT, statusIndicatorLight);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定LED指示燈時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定LED指示燈時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetCameraPower(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定攝影機電源: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& cameraPower = GetStringMember(requestJson, PAYLOAD_KEY_CAMERA);
+        std::cout << "設定攝影機電源 - camera: " << cameraPower << std::endl;
+
+        stSetCameraPowerReq stReq;
+        stSetCameraPowerRep stRep;
+
+        // 驗證statusIndicatorLight參數
+        if (cameraPower == "0") {
+            stReq.cameraPower = false;
+        } else if (cameraPower == "1") {
+            stReq.cameraPower = true;
+        } else {
+            throw std::runtime_error("無效的camera參數，必須為0(關閉)或1(開啟)");
+        }
+        int rc = zwsystem_ipc_setCameraPower(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定攝影機電源");
+        AddString(response, PAYLOAD_KEY_CAMERA, cameraPower);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定攝影機電源時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定攝影機電源時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+
+std::string ChtP2PCameraControlHandler::handleGetSnapshotHamiCamDevice(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理取得快照: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        // 獲取請求參數
+        const std::string& eventId = GetStringMember(requestJson, PAYLOAD_KEY_EVENT_ID);
+        // this is not sync active, so this event id is useless.
+        // The event id must be assigned by system, and pass from event report
+
+        stSnapshotReq stReq;
+        stSnapshotRep stRep;
+        int rc = zwsystem_ipc_quarySnapshot(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "準備截圖");
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "處理快照請求時發生異常: " << e.what() << std::endl;
+        std::string desc = "處理快照請求時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleRestartHamiCamDevice(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理重啟設備: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        std::cout << "重啟請求 - " << std::endl;
+
+        stRebootReq stReq;
+        stRebootRep stRep;
+        int rc = zwsystem_ipc_reboot(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理重啟請求");
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "處理重啟請求時發生異常: " << e.what() << std::endl;
+        std::string desc = "處理重啟請求時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetCamStorageDay(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定儲存天數: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& storageDay = GetStringMember(requestJson, PAYLOAD_KEY_STORAGE_DAY);
+        std::cout << "設定雲存天數 - storageDay: " << storageDay << std::endl;
+
+        // 驗證 storageDay 數值
+        int days = jsonStr2int(PAYLOAD_KEY_STORAGE_DAY, storageDay);
+        if (days < 0 || days > 365)
+        {
+            throw std::runtime_error("雲存天數必須在0-365天之間");
+        }
+
+        stSetStorageDayReq stReq;
+        stReq.storageDay = days;
+
+        stSetStorageDayRep stRep;
+        int rc = zwsystem_ipc_setStorageDay(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定雲存天數");
+        AddString(response, PAYLOAD_KEY_STORAGE_DAY, storageDay);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定雲存天數時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定雲存天數時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleSetCamEventStorageDay(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理設定事件儲存天數: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const std::string& eventStorageDay = GetStringMember(requestJson, PAYLOAD_KEY_EVENT_STORAGE_DAY);
+        std::cout << "設定雲存天數 - eventStorageDay: " << eventStorageDay << std::endl;
+
+        // 驗證 storageDay 數值
+        int days = jsonStr2int(PAYLOAD_KEY_EVENT_STORAGE_DAY, eventStorageDay);
+        if (days < 0 || days > 365)
+        {
+            throw std::runtime_error("雲存天數必須在0-365天之間");
+        }
+
+        stSetStorageDayReq stReq;
+        stReq.storageDay = days;
+
+        stSetStorageDayRep stRep;
+        int rc = zwsystem_ipc_setEventStorageDay(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定事件雲存天數");
+        AddString(response, PAYLOAD_KEY_EVENT_STORAGE_DAY, eventStorageDay);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定事件雲存天數時發生異常: " << e.what() << std::endl;
+        std::string desc = "設定事件雲存天數時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamFormatSDCard(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理格式化SD卡: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        std::cout << "SD卡格式化請求 - " << std::endl;
+
+        stFormatSdCardReq stReq;
+        stFormatSdCardRep stRep;
+        int rc = zwsystem_ipc_formatSdCard(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理SD卡格式化請求");
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "處理SD卡格式化時發生異常: " << e.what() << std::endl;
+        std::string desc = "處理SD卡格式化時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+
+std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlMove(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理PTZ移動控制: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        // 驗證PTZ命令
+        const std::string& cmd = GetStringMember(requestJson, PAYLOAD_KEY_CMD);
+
+        stPtzControlMoveReq stReq;
+        if (cmd == "left") {
+            stReq.moveCmd = ePtzControlMove_Left;
+        } else if (cmd == "right") {
+            stReq.moveCmd = ePtzControlMove_Right;
+        } else if (cmd == "up") {
+            stReq.moveCmd = ePtzControlMove_Up;
+        } else if (cmd == "down") {
+            stReq.moveCmd = ePtzControlMove_Down;
+        } else if (cmd == "stop") {
+            stReq.moveCmd = ePtzControlMove_Stop;
+        } else if (cmd == "pan") {
+            stReq.moveCmd = ePtzControlMove_Pan;
+        } else {
+            throw std::runtime_error("must be left/right/up/down/stop/pan");
+        }
+
+        stPtzControlMoveRep stRep;
+        int rc = zwsystem_ipc_setPtzControlMove(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ移動控制");
+        AddString(response, PAYLOAD_KEY_CMD, cmd);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "PTZ控制異常: " << e.what() << std::endl;
+        std::string desc = "PTZ控制異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigSpeed(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理PTZ速度設定: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        int speed = GetIntMember(requestJson, PAYLOAD_KEY_SPEED);
+        std::cout << "PTZ速度設定 - speed: " << speed << std::endl;
+
+        // 驗證速度範圍
+        if (speed < 0 || speed > 2)
+        {
+            throw std::runtime_error("PTZ速度必須在0-2之間");
+        }
+
+        stSetPtzSpeedReq stReq;
+        stReq.ptzSpeed = (float)speed;
+
+        stSetPtzSpeedRep stRep;
+        int rc = zwsystem_ipc_setPtzSpeed(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ速度設定");
+        //AddString(response, PAYLOAD_KEY_SPEED, speed);
+        response.AddMember(PAYLOAD_KEY_SPEED, speed, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "PTZ速度設定時發生異常: " << e.what() << std::endl;
+        std::string desc = "PTZ速度設定時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamGetPtzControl(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理獲取PTZ控制資訊: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        stGetPtzStatusReq stReq;
+        stGetPtzStatusRep stRep;
+        int rc = zwsystem_ipc_getPtzStatus(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        std::string ptzTourStayTime = std::to_string(stRep.ptzTourStayTime);
+        std::string speed = std::to_string((int)stRep.ptzSpeed);
+        std::string humanTracking = std::to_string(stRep.humanTracking);
+        std::string petTracking = std::to_string(stRep.petTracking);
+        std::string ptzStatus = std::to_string(stRep.ptzStatus);
+        std::string ptzPetStatus = std::to_string(stRep.ptzPetStatus);
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功獲取PTZ控制資訊");
+        AddString(response, PAYLOAD_KEY_PTZ_TOUR_STAY_TIME, ptzTourStayTime);
+        AddString(response, PAYLOAD_KEY_SPEED, speed);
+        AddString(response, PAYLOAD_KEY_HUMAN_TRACKING, humanTracking);
+        AddString(response, PAYLOAD_KEY_PET_TRACKING, petTracking);
+        AddString(response, PAYLOAD_KEY_PTZ_STATUS, ptzStatus);
+        AddString(response, PAYLOAD_KEY_PTZ_PET_STATUS, ptzPetStatus);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "獲取PTZ控制資訊時發生異常: " << e.what() << std::endl;
+        std::string desc = "獲取PTZ控制資訊時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+static bool isValidIndexSequence(const std::string& sequence)
+{
+    // 2,1,3,....
+    static const std::regex indexSequencePattern("^[0-9]+(,[0-9]+)*$");
+    return std::regex_match(sequence, indexSequencePattern);
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlTourGo(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理PTZ巡航: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        // 驗證PTZ命令
+        const std::string& indexSequence = GetStringMember(requestJson, PAYLOAD_KEY_INDEX_SEQUENCE);
+        std::cout << "INFO: 設定PTZ巡航路徑: " << indexSequence << std::endl;
+
+        if (indexSequence.empty())
+        {
+            throw std::runtime_error("巡航路徑不能為空");
+        }
+        if (indexSequence.size() >= ZWSYSTEM_IPC_STRING_SIZE)
+        {
+            throw std::runtime_error("indexSequence is too long");
+        }
+        if (!isValidIndexSequence(indexSequence))
+        {
+            throw std::runtime_error("Invalid indexSequence, must \"<number>,<number>,...\"");
+        }
+
+        stPtzTourGoReq stReq;
+        snprintf(stReq.indexSequence, ZWSYSTEM_IPC_STRING_SIZE, "%s", indexSequence.c_str());
+
+        stPtzTourGoRep stRep;
+        int rc = zwsystem_ipc_setPtzTourGo(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ巡航控制");
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "PTZ巡航模式異常: " << e.what() << std::endl;
+        std::string desc = "PTZ巡航模式異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlGoPst(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理PTZ移動到預設點: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        // 驗證預設點範圍
+        int index = GetIntMember(requestJson, PAYLOAD_KEY_POSITION_INDEX);
+        std::cout << "PTZ移動到預設點 - index: " << index << std::endl;
+        if (index < 1 || index > 4)
+        {
+            throw std::runtime_error("PTZ移動到預設點必須在1-4之間");
+        }
+
+        stPtzGoPresetReq stReq;
+        stReq.index = index;
+
+        stPtzGoPresetRep stRep;
+        int rc = zwsystem_ipc_setPtzGoPreset(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ移動到預設點");
+        response.AddMember(PAYLOAD_KEY_POSITION_INDEX, index, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "PTZ移動到預設點發生異常: " << e.what() << std::endl;
+        std::string desc = "PTZ移動到預設點發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigPst(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理PTZ設定預設點: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        // 驗證預設點範圍
+        int index = GetIntMember(requestJson, PAYLOAD_KEY_POSITION_INDEX);
+        const std::string& remove = GetStringMember(requestJson, PAYLOAD_KEY_REMOVE);
+        const std::string& positionName = GetStringMember(requestJson, PAYLOAD_KEY_POSITION_NAME);
+
+        std::cout << "PTZ設定預設點 - index: " << index << ", remove: " << remove << ", positionName: " << positionName << std::endl;
+        if (index < 1 || index > 4)
+        {
+            throw std::runtime_error("PTZ預設點必須在1-4之間");
+        }
+
+        if (positionName.empty())
+        {
+            throw std::runtime_error("Preset point name cannot empty!!!");
+        }
+        if (positionName.size() >= ZWSYSTEM_IPC_STRING_SIZE)
+        {
+            throw std::runtime_error("Preset point name is too long!!!");
+        }
+        if (!is_valid_utf8(positionName.c_str(), positionName.size()))
+        {
+            throw std::runtime_error("Preset point name string format is invalid");
+        }
+
+        stPtzSetPresetReq stReq;
+        stReq.index = index;
+
+        if (remove == "0") {
+            stReq.remove = false;
+        } else if (remove == "1") {
+            stReq.remove = true;
+        } else {
+            throw std::runtime_error("PTZ預設點參數remove數值不正確");
+        }
+
+        snprintf(stReq.presetName, ZWSYSTEM_IPC_STRING_SIZE, "%s", positionName.c_str());
+
+        stPtzSetPresetRep stRep;
+        int rc = zwsystem_ipc_setPtzPresetPoint(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ設定預設點");
+        response.AddMember(PAYLOAD_KEY_POSITION_INDEX, index, allocator);
+        AddString(response, PAYLOAD_KEY_REMOVE, remove);
+        AddString(response, PAYLOAD_KEY_POSITION_NAME, positionName);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "PTZ設定預設點發生異常: " << e.what() << std::endl;
+        std::string desc = "PTZ設定預設點發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamHumanTracking(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理人體追蹤開關: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        int val = GetIntMember(requestJson, PAYLOAD_KEY_VAL);
+        std::cout << "人體追蹤開關 - val: " << val << std::endl;
+
+        // 驗證開關範圍
+        stPtzSetTrackingReq stReq;
+        if (val == 0) {
+            stReq.val = ePtzTracking_Off;
+        } else if (val == 1) {
+            stReq.val = ePtzTracking_GoToHome;
+        } else if (val == 2) {
+            stReq.val = ePtzTracking_Stay;
+        } else {
+            throw std::runtime_error("人體追蹤開關必須在0-2之間");
+        }
+
+        stPtzSetTrackingRep stRep;
+        int rc = zwsystem_ipc_setPtzHumanTracking(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定人體追蹤開關");
+        response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定人體追蹤開關發生異常: " << e.what() << std::endl;
+        std::string desc = "設定人體追蹤開關發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+std::string ChtP2PCameraControlHandler::handleHamiCamPetTracking(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理寵物追蹤開關: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        int val = GetIntMember(requestJson, PAYLOAD_KEY_VAL);
+        std::cout << "寵物追蹤開關 - val: " << val << std::endl;
+
+        // 驗證開關範圍
+        stPtzSetTrackingReq stReq;
+        if (val == 0) {
+            stReq.val = ePtzTracking_Off;
+        } else if (val == 1) {
+            stReq.val = ePtzTracking_GoToHome;
+        } else if (val == 2) {
+            stReq.val = ePtzTracking_Stay;
+        } else {
+            throw std::runtime_error("寵物追蹤開關必須在0-2之間");
+        }
+
+        stPtzSetTrackingRep stRep;
+        int rc = zwsystem_ipc_setPtzPetTracking(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定寵物追蹤開關");
+        response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "設定寵物追蹤開關發生異常: " << e.what() << std::endl;
+        std::string desc = "設定寵物追蹤開關發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+
+std::string ChtP2PCameraControlHandler::handleGetHamiCamBindList(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理獲取綁定清單: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        stGetCameraBindWifiInfoReq stReq;
+        stGetCameraBindWifiInfoRep stRep;
+        int rc = zwsystem_ipc_getCameraBindWifiInfo(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        const std::string& wifiSsid(stRep.wifiSsid);
+        const std::string& wifiPassword(stRep.password); //base64
+
+        // 先回應準備截圖訊息
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功取得WiFi資訊");
+        AddString(response, PAYLOAD_KEY_WIFI_SSID, wifiSsid);
+        AddString(response, PAYLOAD_KEY_PSWD, wifiPassword);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "handleGetHamiCamBindList異常: " << e.what() << std::endl;
+        std::string desc = "handleGetHamiCamBindList異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+// 檢查韌體檔案是否有效
+bool validateFirmwareFile(const std::string &filePath)
+{
+    try
+    {
+        struct stat fileStat;
+
+        // 檢查檔案是否存在
+        if (stat(filePath.c_str(), &fileStat) != 0)
+        {
+            std::cerr << "ERROR: 韌體檔案不存在: " << filePath << std::endl;
+            return false;
+        }
+
+        // 檢查是否為一般檔案
+        if (!S_ISREG(fileStat.st_mode))
+        {
+            std::cerr << "ERROR: 路徑不是一般檔案: " << filePath << std::endl;
+            return false;
+        }
+
+        // 檢查檔案大小（韌體檔案應該有一定大小）
+        if (fileStat.st_size < 1024)
+        { // 小於 1KB 可能有問題
+            std::cerr << "ERROR: 韌體檔案大小異常: " << fileStat.st_size << " bytes" << std::endl;
+            return false;
+        }
+
+        // 檢查檔案是否可讀
+        if (access(filePath.c_str(), R_OK) != 0)
+        {
+            std::cerr << "ERROR: 韌體檔案無法讀取: " << filePath << std::endl;
+            return false;
+        }
+
+        std::cout << "INFO: 韌體檔案驗證通過 - 大小: " << fileStat.st_size << " bytes" << std::endl;
+        return true;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "ERROR: 驗證韌體檔案時發生例外: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+std::string ChtP2PCameraControlHandler::handleUpgradeHamiCamOTA(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理OTA升級: " << payload << std::endl;
+
+    try
+    {
+        // 步驟 1: 解析輸入的 JSON payload
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        // 步驟 2: 驗證必要欄位
+        const std::string& upgradeMode = GetStringMember(requestJson, PAYLOAD_KEY_UPGRADE_MODE);
+        const std::string& filePath = GetStringMember(requestJson, PAYLOAD_KEY_FILE_PATH);
+        std::cout << "INFO: 更新模式: " << upgradeMode << std::endl;
+        std::cout << "INFO: 韌體檔案路徑: " << filePath << std::endl;
+
+        // 步驟 4: 驗證韌體檔案
+        if (filePath.empty()) {
+            throw std::runtime_error("filePath 參數不能為空");
+        }
+        if (filePath.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
+            throw std::runtime_error("filePath is too long");
+        }
+        if (!validateFirmwareFile(filePath))
+        {
+            throw std::runtime_error("filePath 韌體檔案驗證失敗");
+        }
+
+        // 步驟 6: 準備 OTA 更新
+        std::cout << "INFO: 準備執行 OTA 更新..." << std::endl;
+        stUpgradeCameraOtaReq stReq;
+
+        if (upgradeMode == "0") {
+            stReq.upgradeMode = eUpgradeMode_Immediately;
+        } else if (upgradeMode == "1") {
+            stReq.upgradeMode = eUpgradeMode_Later;
+        } else {
+            throw std::runtime_error("upgradeMode 更新模式參數無效");
+        }
+
+        snprintf(stReq.filePath, ZWSYSTEM_IPC_STRING_SIZE, "%s", filePath.c_str());
+        stUpgradeCameraOtaRep stRep;
+        int rc = zwsystem_ipc_upgradeCameraOta(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 步驟 7: 建立成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "準備更新OTA");
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "handleUpgradeHamiCamOTA異常: " << e.what() << std::endl;
+        std::string desc = "handleUpgradeHamiCamOTA異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+static bool parseJson2AiSettingStruct(const rapidjson::Value& obj,
+        stHamiAiSetting *pstAiSetting,
+        rapidjson::Document::AllocatorType& alloc)
+{
+    if (!pstAiSetting) return false;
+    if (!obj.IsObject()) return false;
+
+    // 告警設定 (Alert)
+    auto parseAlert = [](const rapidjson::Value& v, bool& out) -> bool {
+        if (v.IsBool()) { out = v.GetBool(); return true; }
+        if (v.IsInt()) {
+            int x = v.GetInt();
+            if (x == 0) { out = false; return true; }
+            if (x == 1) { out = true;  return true; }
+            return false;
+        }
+        if (v.IsString()) {
+            const char *s = v.GetString();
+            const auto n = v.GetStringLength();
+            if (n == 1 && s[0] == '0') { out = false; return true; }
+            if (n == 1 && s[0] == '1') { out = true;  return true; }
+            return false;
+        }
+        return false;
+    };
+
+    // 靈敏度設定 (Sen) - 轉換為 int
+    auto parseSen = [](const rapidjson::Value& v, eSenMode& out) -> bool {
+        if (v.IsInt()) {
+            int x = v.GetInt();
+            if (x == 0) { out = eSenMode_Low;    return true; }
+            if (x == 1) { out = eSenMode_Middle; return true; }
+            if (x == 2) { out = eSenMode_High;   return true; }
+            return false;
+        }
+        if (v.IsString()) {
+            const char *s = v.GetString();
+            const auto n = v.GetStringLength();
+            if (n == 1 && s[0] == '0') { out = eSenMode_Low;    return true; }
+            if (n == 1 && s[0] == '1') { out = eSenMode_Middle; return true; }
+            if (n == 1 && s[0] == '2') { out = eSenMode_High;   return true; }
+            return false;
+        }
+        return false;
+    };
+
+    // 電子圍籬座標
+    auto parseFencePos = [](const rapidjson::Value& v, std::pair<int, int>& out) -> bool {
+        if (!v.IsObject()) return false;
+
+        auto it = v.FindMember(PAYLOAD_KEY_X);
+        if (it == v.MemberEnd() || !it->value.IsInt()) return false;
+        out.first = it->value.GetInt();
+        it = v.FindMember(PAYLOAD_KEY_Y);
+        if (it == v.MemberEnd() || !it->value.IsInt()) return false;
+        out.second = it->value.GetInt();
+
+        if (out.first < 0 || out.second < 0) return false;
+        return true;
+    };
+
+    pstAiSetting->updateBit = 0;
+    pstAiSetting->fencePosUpdateBit = 0;
+    for (const auto& m : obj.GetObject()) {
+        const char *key = m.name.GetString();
+        const rapidjson::Value& val = m.value;
+
+#define HANDLE_ALERT(KEY_MACRO, MASK, FIELD)                              \
+        do {                                                              \
+            if (std::strcmp(key, (KEY_MACRO)) == 0) {                     \
+                if (!parseAlert(val, pstAiSetting->FIELD)) return false;  \
+                pstAiSetting->updateBit |= (MASK);                        \
+                continue;                                                 \
+            }                                                             \
+        } while (0)
+
+#define HANDLE_SEN(KEY_MACRO, MASK, FIELD)                                \
+        do {                                                              \
+            if (std::strcmp(key, (KEY_MACRO)) == 0) {                     \
+                if (!parseSen(val, pstAiSetting->FIELD)) return false;    \
+                pstAiSetting->updateBit |= (MASK);                        \
+                continue;                                                 \
+            }                                                             \
+        } while (0)
+
+#define HANDLE_FENCEPOS(KEY_MACRO, MASK, FIELD)                           \
+        do {                                                              \
+            if (std::strcmp(key, (KEY_MACRO)) == 0) {                     \
+                std::pair<int, int> out;                                  \
+                if (!parseFencePos(val, out)) return false;               \
+                pstAiSetting->FIELD.x = (float)out.first;                 \
+                pstAiSetting->FIELD.y = (float)out.second;                \
+                pstAiSetting->updateBit |= eAiSettingUpdateMask_FencePos; \
+                pstAiSetting->fencePosUpdateBit |= (MASK);                \
+                continue;                                                 \
+            }                                                             \
+        } while (0)
+
+        HANDLE_ALERT(PAYLOAD_KEY_VMD_ALERT,         eAiSettingUpdateMask_VmdAlert,        vmdAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_HUMAN_ALERT,       eAiSettingUpdateMask_HumanAlert,      humanAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_PET_ALERT,         eAiSettingUpdateMask_PetAlert,        petAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_AD_ALERT,          eAiSettingUpdateMask_AdAlert,         adAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_FENCE_ALERT,       eAiSettingUpdateMask_FenceAlert,      fenceAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_FACE_ALERT,        eAiSettingUpdateMask_FaceAlert,       faceAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_FALL_ALERT,        eAiSettingUpdateMask_FallAlert,       fallAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_AD_BABY_CRY_ALERT, eAiSettingUpdateMask_AdBabyCryAlert,  adBabyCryAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_AD_SPEECH_ALERT,   eAiSettingUpdateMask_AdSpeechAlert,   adSpeechAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_AD_ALARM_ALERT,    eAiSettingUpdateMask_AdAlarmAlert,    adAlarmAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_AD_DOG_ALERT,      eAiSettingUpdateMask_AdDogAlert,      adDogAlert);
+        HANDLE_ALERT(PAYLOAD_KEY_AD_CAT_ALERT,      eAiSettingUpdateMask_AdCatAlert,      adCatAlert);
+
+        HANDLE_SEN(PAYLOAD_KEY_VMD_SEN,         eAiSettingUpdateMask_VmdSen,        vmdSen);
+        HANDLE_SEN(PAYLOAD_KEY_AD_SEN,          eAiSettingUpdateMask_AdSen,         adSen);
+        HANDLE_SEN(PAYLOAD_KEY_HUMAN_SEN,       eAiSettingUpdateMask_HumanSen,      humanSen);
+        HANDLE_SEN(PAYLOAD_KEY_FACE_SEN,        eAiSettingUpdateMask_FaceSen,       faceSen);
+        HANDLE_SEN(PAYLOAD_KEY_FENCE_SEN,       eAiSettingUpdateMask_FenceSen,      fenceSen);
+        HANDLE_SEN(PAYLOAD_KEY_PET_SEN,         eAiSettingUpdateMask_PetSen,        petSen);
+        HANDLE_SEN(PAYLOAD_KEY_FALL_SEN,        eAiSettingUpdateMask_FallSen,       fallSen);
+        HANDLE_SEN(PAYLOAD_KEY_AD_BABY_CRY_SEN, eAiSettingUpdateMask_AdBabySen,     adBabyCrySen);
+        HANDLE_SEN(PAYLOAD_KEY_AD_SPEECH_SEN,   eAiSettingUpdateMask_AdSpeechSen,   adSpeechSen);
+        HANDLE_SEN(PAYLOAD_KEY_AD_ALARM_SEN,    eAiSettingUpdateMask_AdAlarmSen,    adAlarmSen);
+        HANDLE_SEN(PAYLOAD_KEY_AD_DOG_SEN,      eAiSettingUpdateMask_AdDogSen,      adDogSen);
+        HANDLE_SEN(PAYLOAD_KEY_AD_CAT_SEN,      eAiSettingUpdateMask_AdCatSen,      adCatSen);
+
+        pstAiSetting->fencePosSize = ZWSYSTEM_FENCE_POSITION_SIZE;
+        HANDLE_FENCEPOS(PAYLOAD_KEY_FENCE_POS1, eFencePosUpdateMask_FencePos_1, fencePos[0]);
+        HANDLE_FENCEPOS(PAYLOAD_KEY_FENCE_POS2, eFencePosUpdateMask_FencePos_2, fencePos[1]);
+        HANDLE_FENCEPOS(PAYLOAD_KEY_FENCE_POS3, eFencePosUpdateMask_FencePos_3, fencePos[2]);
+        HANDLE_FENCEPOS(PAYLOAD_KEY_FENCE_POS4, eFencePosUpdateMask_FencePos_4, fencePos[3]);
+
+#undef HANDLE_ALERT
+#undef HANDLE_SEN
+#undef HANDLE_FENCEPOS
+
+        if (std::strcmp(key, PAYLOAD_KEY_IDENTIFICATION_FEATURES) == 0) {
+            if (!val.IsArray()) return false;
+
+            rapidjson::SizeType faceIdx = 0;
+            for (faceIdx = 0; faceIdx < val.Size(); faceIdx++)
+            {
+                if (faceIdx >= ZWSYSTEM_FACE_FEATURES_ARRAY_SIZE) break;
+                stIdentificationFeature *pstFeatures = &pstAiSetting->features[faceIdx];
+
+                const auto& faceObj = val[faceIdx];
+                if (!faceObj.IsObject()) return false;
+
+                auto it = faceObj.FindMember(PAYLOAD_KEY_ID);
+                if (it == faceObj.MemberEnd() || !it->value.IsInt()) return false;
+                int id = it->value.GetInt();
+                if (id < 0) return false;
+                pstFeatures->id = id;
+
+                it = faceObj.FindMember(PAYLOAD_KEY_VERIFY_LEVEL);
+                if (it == faceObj.MemberEnd() || !it->value.IsInt()) return false;
+                int level = it->value.GetInt();
+                if (level == 1) {
+                    pstFeatures->verifyLevel = eVerifyLevel_Low;
+                } else if (level == 2) {
+                    pstFeatures->verifyLevel = eVerifyLevel_High;
+                } else {
+                    return false;
+                }
+
+                it = faceObj.FindMember(PAYLOAD_KEY_NAME);
+                if (it == faceObj.MemberEnd() || !it->value.IsString()) return false;
+                std::string name = it->value.GetString();
+                if (name.empty() || name.size() >= ZWSYSTEM_IPC_STRING_SIZE) return false;
+                if (!is_valid_utf8(name.c_str(), name.size())) return false;
+                snprintf(pstFeatures->name, ZWSYSTEM_IPC_STRING_SIZE, "%s", name.c_str());
+
+                it = faceObj.FindMember(PAYLOAD_KEY_CREATE_TIME);
+                if (it == faceObj.MemberEnd() || !it->value.IsString()) return false;
+                std::string createTime = it->value.GetString();
+                if (createTime.empty() || createTime.size() >= ZWSYSTEM_IPC_STRING_SIZE) return false;
+                snprintf(pstFeatures->createTime, ZWSYSTEM_IPC_STRING_SIZE, "%s", createTime.c_str());
+
+                it = faceObj.FindMember(PAYLOAD_KEY_UPDATE_TIME);
+                if (it == faceObj.MemberEnd() || !it->value.IsString()) return false;
+                std::string updateTime = it->value.GetString();
+                if (updateTime.empty() || updateTime.size() >= ZWSYSTEM_IPC_STRING_SIZE) return false;
+                snprintf(pstFeatures->updateTime, ZWSYSTEM_IPC_STRING_SIZE, "%s", updateTime.c_str());
+
+                it = faceObj.FindMember(PAYLOAD_KEY_FACE_FEATURES);
+                if (it == faceObj.MemberEnd() || !it->value.IsArray()) return false;
+                const auto& featureBlob = it->value.GetArray();
+                if (featureBlob.Size() != ZWSYSTEM_FACE_FEATURES_SIZE) return false;
+                rapidjson::SizeType blobIdx = 0;
+                for (blobIdx = 0; blobIdx < featureBlob.Size(); blobIdx++) {
+                    if (!featureBlob[blobIdx].IsUint() || featureBlob[blobIdx].GetUint() > 255) return false;
+                    pstFeatures->faceFeatures[blobIdx] =  static_cast<uint8_t>(featureBlob[blobIdx].GetUint());
+                }
+            }
+
+            pstAiSetting->featuresObjSize = faceIdx;
+            pstAiSetting->updateBit |= eAiSettingUpdateMask_Features;
+            continue;
+        }
+
+        if (std::strcmp(key, PAYLOAD_KEY_FENCE_DIR) == 0) {
+            if (!val.IsString()) return false;
+            bool res = false;
+            const char *s = val.GetString();
+            const auto n = val.GetStringLength();
+            if (n == 1 && s[0] == '0') { pstAiSetting->fenceDir = eFenceDir_Out2In; res = true; }
+            if (n == 1 && s[0] == '1') { pstAiSetting->fenceDir = eFenceDir_In2Out; res = true; }
+            if (!res) return false;
+
+            pstAiSetting->updateBit |= eAiSettingUpdateMask_FenceDir;
+            continue;
+        }
+    }
+
+    return true;
+}
+
+std::string ChtP2PCameraControlHandler::handleUpdateCameraAISetting(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理更新AI設定: " << payload << std::endl;
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        const auto& hamiAiSettingsJson = GetObjectMember(requestJson, PAYLOAD_KEY_HAMI_AI_SETTINGS);
+
+        stCameraAiSettingReq stReq;
+
+        if (!parseJson2AiSettingStruct(hamiAiSettingsJson, &stReq.aiSetting, requestJson.GetAllocator()))
+        {
+            throw std::runtime_error("parse hamiAiSettings error!!!");
+        }
+
+        stCameraAiSettingRep stRep;
+        int rc = zwsystem_ipc_setCameraAiSetting(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType& allocator = response.GetAllocator();
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功更新AI設定");
+
+        // 序列化回應
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "更新AI設定時發生異常: " << e.what() << std::endl;
+        std::string desc = "更新AI設定時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
+    return "";
+}
+
+static bool parseAiSettingStruct2Json(rapidjson::Value &outObj,
+        const stHamiAiSetting *pstAiSetting,
+        rapidjson::Document::AllocatorType& alloc)
+{
+    if (!pstAiSetting) return false;
+
+    outObj.SetObject();
+
+    // 告警設定 (Alert)
+    auto addAlert = [&](const char *key, bool val) {
+        outObj.AddMember(
+            rapidjson::StringRef(key),
+            rapidjson::Value((val)?"1":"0", alloc),
+            alloc);
+    };
+    addAlert(PAYLOAD_KEY_VMD_ALERT,        pstAiSetting->vmdAlert);
+    addAlert(PAYLOAD_KEY_HUMAN_ALERT,      pstAiSetting->humanAlert);
+    addAlert(PAYLOAD_KEY_PET_ALERT,        pstAiSetting->petAlert);
+    addAlert(PAYLOAD_KEY_AD_ALERT,         pstAiSetting->adAlert);
+    addAlert(PAYLOAD_KEY_FENCE_ALERT,      pstAiSetting->fenceAlert);
+    addAlert(PAYLOAD_KEY_FACE_ALERT,       pstAiSetting->faceAlert);
+    addAlert(PAYLOAD_KEY_FALL_ALERT,       pstAiSetting->fallAlert);
+    addAlert(PAYLOAD_KEY_AD_BABY_CRY_ALERT, pstAiSetting->adBabyCryAlert);
+    addAlert(PAYLOAD_KEY_AD_SPEECH_ALERT,   pstAiSetting->adSpeechAlert);
+    addAlert(PAYLOAD_KEY_AD_ALARM_ALERT,    pstAiSetting->adAlarmAlert);
+    addAlert(PAYLOAD_KEY_AD_DOG_ALERT,      pstAiSetting->adDogAlert);
+    addAlert(PAYLOAD_KEY_AD_CAT_ALERT,      pstAiSetting->adCatAlert);
+
+    // 靈敏度設定 (Sen) - 轉換為 int
+    auto addSensitivity = [&](const char *key, int val) {
+        outObj.AddMember(
+            rapidjson::StringRef(key),
+            val,
+            alloc);
+    };
+    addSensitivity(PAYLOAD_KEY_VMD_SEN,        pstAiSetting->vmdSen);
+    addSensitivity(PAYLOAD_KEY_HUMAN_SEN,      pstAiSetting->humanSen);
+    addSensitivity(PAYLOAD_KEY_PET_SEN,        pstAiSetting->petSen);
+    addSensitivity(PAYLOAD_KEY_AD_SEN,         pstAiSetting->adSen);
+    addSensitivity(PAYLOAD_KEY_FENCE_SEN,      pstAiSetting->fenceSen);
+    addSensitivity(PAYLOAD_KEY_FACE_SEN,       pstAiSetting->faceSen);
+    addSensitivity(PAYLOAD_KEY_FALL_SEN,       pstAiSetting->fallSen);
+    addSensitivity(PAYLOAD_KEY_AD_BABY_CRY_SEN, pstAiSetting->adBabyCrySen);
+    addSensitivity(PAYLOAD_KEY_AD_SPEECH_SEN,   pstAiSetting->adSpeechSen);
+    addSensitivity(PAYLOAD_KEY_AD_ALARM_SEN,    pstAiSetting->adAlarmSen);
+    addSensitivity(PAYLOAD_KEY_AD_DOG_SEN,      pstAiSetting->adDogSen);
+    addSensitivity(PAYLOAD_KEY_AD_CAT_SEN,      pstAiSetting->adCatSen);
+
+    // 電子圍籬座標
+    auto addFencePos = [&](const char *key, const std::pair<int, int>& val)
+    {
+        rapidjson::Value pos(rapidjson::kObjectType);
+        pos.AddMember(PAYLOAD_KEY_X, val.first, alloc);
+        pos.AddMember(PAYLOAD_KEY_Y, val.second, alloc);
+
+        outObj.AddMember(
+            rapidjson::StringRef(key),
+            pos.Move(),
+            alloc);
+    };
+    addFencePos(PAYLOAD_KEY_FENCE_POS1, std::pair<int, int>(
+                (int)(pstAiSetting->fencePos[0].x*100), (int)(pstAiSetting->fencePos[0].y*100)));
+    addFencePos(PAYLOAD_KEY_FENCE_POS2, std::pair<int, int>(
+                (int)(pstAiSetting->fencePos[1].x*100), (int)(pstAiSetting->fencePos[1].y*100)));
+    addFencePos(PAYLOAD_KEY_FENCE_POS3, std::pair<int, int>(
+                (int)(pstAiSetting->fencePos[2].x*100), (int)(pstAiSetting->fencePos[2].y*100)));
+    addFencePos(PAYLOAD_KEY_FENCE_POS4, std::pair<int, int>(
+                (int)(pstAiSetting->fencePos[3].x*100), (int)(pstAiSetting->fencePos[3].y*100)));
+
+    // 圍籬方向
+    if (pstAiSetting->fenceDir == eFenceDir_Out2In)
+    {
+        AddString(outObj, PAYLOAD_KEY_FENCE_DIR, "0", alloc);
+    }
+    else if (pstAiSetting->fenceDir == eFenceDir_In2Out)
+    {
+        AddString(outObj, PAYLOAD_KEY_FENCE_DIR, "1", alloc);
+    }
+    else
+    {
+        std::cerr << "FenceDir value is invalid!!!" << std::endl;
+        return false;
+    }
+    outObj.AddMember(PAYLOAD_KEY_FALL_TIME, pstAiSetting->fallTime, alloc);
+
+    // 人臉識別特徵（暫時空陣列）
+    rapidjson::Value identificationFeatures(rapidjson::kArrayType);
+
+    uint32_t saved_featuresObjSize = pstAiSetting->featuresObjSize;
+    for (uint32_t i = 0; i < saved_featuresObjSize; i++)
+    {
+        const stIdentificationFeature *pstFeature = &pstAiSetting->features[i];
+
+        rapidjson::Value featureObj(rapidjson::kObjectType);
+        featureObj.AddMember(PAYLOAD_KEY_ID, pstFeature->id, alloc);
+        AddString(featureObj, PAYLOAD_KEY_NAME, pstFeature->name, alloc);
+        AddString(featureObj, PAYLOAD_KEY_CREATE_TIME, pstFeature->createTime, alloc);
+        AddString(featureObj, PAYLOAD_KEY_UPDATE_TIME, pstFeature->updateTime, alloc);
+
+        if (pstFeature->verifyLevel == eVerifyLevel_Low)
+        {
+            featureObj.AddMember(PAYLOAD_KEY_VERIFY_LEVEL, 1, alloc);
+        }
+        else if (pstFeature->verifyLevel == eVerifyLevel_High)
+        {
+            featureObj.AddMember(PAYLOAD_KEY_VERIFY_LEVEL, 2, alloc);
+        }
+        else
+        {
+            std::cerr << "feature verify level value is invalid!!!" << std::endl;
+            return false;
+        }
+
+        rapidjson::Value blobArray(rapidjson::kArrayType);
+        blobArray.Reserve(ZWSYSTEM_FACE_FEATURES_SIZE, alloc);
+
+        for (uint32_t j = 0; j < ZWSYSTEM_FACE_FEATURES_SIZE; j++) {
+            blobArray.PushBack(pstFeature->faceFeatures[j], alloc);
+        }
+        featureObj.AddMember(PAYLOAD_KEY_FACE_FEATURES, blobArray.Move(), alloc);
+
+        identificationFeatures.PushBack(featureObj.Move(), alloc);
+    }
+
+    outObj.AddMember(PAYLOAD_KEY_IDENTIFICATION_FEATURES, identificationFeatures.Move(), alloc);
+
+    return true;
+}
+
+std::string ChtP2PCameraControlHandler::handleGetCameraAISetting(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理獲取AI設定: " << payload << std::endl;
+
+    try
+    {
+        // 解析請求 JSON
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        // 從參數管理器獲取最新參數
+        auto &paramsManager = CameraParametersManager::getInstance();
+        const std::string& saved_camId = paramsManager.getCameraId();
+
+        std::string errMsg = "";
+        if (!validateCamId(requestJson, saved_camId, errMsg))
+        {
+            throw std::runtime_error(errMsg);
+        }
+
+        stCameraAiSettingReq stReq;
+        stCameraAiSettingRep stRep;
+        int rc = zwsystem_ipc_getCameraAiSetting(stReq, &stRep);
+        if (rc < 0 || stRep.code < 0)
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        const stHamiAiSetting *pstAiSetting = &stRep.aiSetting;
+        if ( (pstAiSetting->updateBit != eAiSettingUpdateMask_ALL) ||
+             (pstAiSetting->fencePosUpdateBit != eFencePosUpdateMask_ALL) )
+        {
+            throw std::runtime_error("system service error!!!");
+        }
+
+        // 構建回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功獲取AI設定");
+
+        // 解析已儲存的 AI 設定或建立預設值
+        rapidjson::Value aiSettings(rapidjson::kObjectType);
+        if (!parseAiSettingStruct2Json(aiSettings, pstAiSetting, allocator))
+        {
+            throw std::runtime_error("Get local AI settings error");
+        }
+
+        // 將 aiSettingsDoc 加入回應
+        response.AddMember(PAYLOAD_KEY_HAMI_AI_SETTINGS, aiSettings.Move(), allocator);
+
+        // 序列化回應
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        // 構建失敗回應
+        std::cerr << "獲取AI設定時發生異常: " << e.what() << std::endl;
+        std::string desc = "獲取AI設定時發生異常: " + std::string(e.what());
+        std::string outResult = "";
+        createErrorResponse(desc, outResult);
+
+        return outResult;
+    }
+
     return "";
 }
 
@@ -2393,1089 +4714,6 @@ bool performNtpSync()
     return false;
 }
 
-std::string ChtP2PCameraControlHandler::handleSetFlicker(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定閃爍率: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string flicker;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("flicker") && requestJson["flicker"].IsString())
-        {
-            flicker = requestJson["flicker"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: flicker");
-        }
-
-        // 驗證flicker參數
-        if (flicker != "0" && flicker != "1" && flicker != "2")
-        {
-            throw std::runtime_error("無效的flicker參數，必須為0(50Hz)、1(60Hz)或2(戶外)");
-        }
-
-        std::cout << "設定閃爍率 - camId: " << camId
-                  << ", flicker: " << flicker << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新閃爍率設定到參數管理器
-        paramsManager.setParameter("flicker", flicker);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "閃爍率設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定閃爍率
-        // 例如：CameraDriver::getInstance().setFlickerMode(std::stoi(flicker));
-        //  ONLY support  50 Hz  / 60 Hz to type
-        int iFlicker;
-        if (flicker == "0")
-            iFlicker = 50;
-        else if (flicker == "1")
-            iFlicker = 60;
-        else
-            iFlicker = 60;
-        //CameraDriver::getInstance().setFlickerMode(iFlicker);
-        //CameraDriver::getInstance().setFlickerMode(iFlicker);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("flicker", rapidjson::Value(flicker.c_str(), allocator).Move(), allocator);
-        response.AddMember("flicker", rapidjson::Value(flicker.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定閃爍率時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetImageQuality(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定影像品質: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON - 使用 rapidjson
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-        std::string imageQuality;
-
-        // 獲取請求參數 - 使用 rapidjson
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: camId");
-        }
-
-        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
-        {
-            requestId = requestJson["requestId"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: requestId");
-        }
-
-        if (requestJson.HasMember("imageQuality") && requestJson["imageQuality"].IsString())
-        {
-            imageQuality = requestJson["imageQuality"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: imageQuality");
-        }
-
-        // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
-        std::regex requestIdPattern("^(UDP|Relay)_live_.+_.+$");
-        if (!std::regex_match(requestId, requestIdPattern))
-        {
-            std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
-            throw std::runtime_error("requestId格式錯誤");
-        }
-
-        // 驗證imageQuality參數
-        if (imageQuality != "0" && imageQuality != "1" && imageQuality != "2")
-        {
-            throw std::runtime_error("無效的imageQuality參數，必須為0(Low)、1(Middle)或2(High)");
-        }
-
-        std::cout << "設定影像品質 - camId: " << camId
-                  << ", requestId: " << requestId
-                  << ", imageQuality: " << imageQuality << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId
-        std::string currentCamId = paramsManager.getCameraId();
-        if (camId != currentCamId)
-        {
-            std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-            throw std::runtime_error("攝影機 ID 不符");
-        }
-#if 0
-#if 0
-        // 檢查是否為模擬模式
-        auto &driver = CameraDriver::getInstance();
-        bool isSimulationMode = driver.isSimulationMode();
-
-        std::cout << "運行模式: " << (isSimulationMode ? "模擬模式" : "真實模式") << std::endl;
-
-        // 更新影像品質設定到參數管理器
-        paramsManager.setRequestId(requestId);
-        paramsManager.setImageQuality(imageQuality);
-
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "影像品質設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 根據模式調用適當的硬體設定
-        bool hardwareResult = false;
-        if (isSimulationMode)
-        {
-            std::cout << "模擬模式：跳過硬體設定驗證" << std::endl;
-            hardwareResult = driver.setImageQuality(std::stoi(imageQuality));
-        }
-        else
-        {
-            std::cout << "真實模式：執行硬體設定" << std::endl;
-            hardwareResult = driver.setImageQuality(std::stoi(imageQuality));
-
-            // 在真實模式下，如果硬體設定失敗，拋出異常
-            if (!hardwareResult)
-            {
-                throw std::runtime_error("硬體設定失敗");
-            }
-        }
-
-        std::cout << "影像品質硬體設定結果: " << (hardwareResult ? "成功" : "失敗") << std::endl;
-#endif
-#endif
-        // ==== 回應 ====
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("requestId", rapidjson::Value(requestId.c_str(), allocator).Move(), allocator);
-        response.AddMember("imageQuality", rapidjson::Value(imageQuality.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "影像品質設定成功回應: " << responseStr << std::endl;
-
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定影像品質時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應 - 使用 rapidjson
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetMicrophone(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定麥克風: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string microphoneSensitivity;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("microphoneSensitivity") && requestJson["microphoneSensitivity"].IsString())
-        {
-            microphoneSensitivity = requestJson["microphoneSensitivity"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: microphoneSensitivity");
-        }
-
-        // 驗證microphoneSensitivity參數（0~10）
-        int sensitivity = 0;
-        try
-        {
-            sensitivity = std::stoi(microphoneSensitivity);
-            if (sensitivity < 0 || sensitivity > 10)
-            {
-                throw std::runtime_error("無效的microphoneSensitivity參數，必須為0~10之間");
-            }
-        }
-        catch (const std::invalid_argument &)
-        {
-            throw std::runtime_error("microphoneSensitivity參數格式錯誤，必須為數字");
-        }
-
-        std::cout << "設定麥克風 - camId: " << camId
-                  << ", microphoneSensitivity: " << microphoneSensitivity << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新麥克風設定到參數管理器
-        paramsManager.setParameter("microphoneSensitivity", microphoneSensitivity);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "麥克風設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定麥克風靈敏度
-        // 例如：CameraDriver::getInstance().setMicrophoneSensitivity(std::stoi(microphoneSensitivity));
-        int setSensitivityVal = 0;
-        setSensitivityVal = sensitivity * 10;
-        //CameraDriver::getInstance().setMicrophoneHardware(true, setSensitivityVal);
-        //CameraDriver::getInstance().setMicrophoneHardware(true, setSensitivityVal);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("microphoneSensitivity", rapidjson::Value(microphoneSensitivity.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定麥克風時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetNightMode(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定夜間模式: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string nightMode;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("nightMode") && requestJson["nightMode"].IsString())
-        {
-            nightMode = requestJson["nightMode"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: nightMode");
-        }
-
-        // 驗證nightMode參數
-        if (nightMode != "0" && nightMode != "1")
-        {
-            throw std::runtime_error("無效的nightMode參數，必須為0(關閉)或1(開啟)");
-        }
-
-        std::cout << "設定夜間模式 - camId: " << camId
-                  << ", nightMode: " << nightMode << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新夜間模式設定到參數管理器
-        paramsManager.setParameter("nightMode", nightMode);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "夜間模式設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定夜間模式
-        // 例如：CameraDriver::getInstance().setNightMode(nightMode == "1");
-        // ## DEPEND  on factory.sh  test nightmode shell script
-        bool bIsNightMod;
-        if (nightMode == "0")
-            bIsNightMod = false;
-        else if (nightMode == "1")
-            bIsNightMod = true;
-        else
-            bIsNightMod = false;
-        //CameraDriver::getInstance().setNightModeHardware(bIsNightMod, false);
-        //CameraDriver::getInstance().setNightModeHardware(bIsNightMod, false);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("nightMode", rapidjson::Value(nightMode.c_str(), allocator).Move(), allocator);
-        response.AddMember("nightMode", rapidjson::Value(nightMode.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定夜間模式時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetAutoNightVision(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定自動夜視: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string autoNightVision;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("autoNightVision") && requestJson["autoNightVision"].IsString())
-        {
-            autoNightVision = requestJson["autoNightVision"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: autoNightVision");
-        }
-
-        // 驗證autoNightVision參數
-        if (autoNightVision != "0" && autoNightVision != "1")
-        {
-            throw std::runtime_error("無效的autoNightVision參數，必須為0(關閉)或1(開啟)");
-        }
-
-        std::cout << "設定自動夜視 - camId: " << camId
-                  << ", autoNightVision: " << autoNightVision << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新自動夜視設定到參數管理器
-        paramsManager.setParameter("autoNightVision", autoNightVision);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "自動夜視設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定自動夜視
-        // 例如：CameraDriver::getInstance().setAutoNightVision(autoNightVision == "1");
-
-        bool bIsAutoNightVision;
-        if (autoNightVision == "0")
-            bIsAutoNightVision = false;
-        else if (autoNightVision == "1")
-            bIsAutoNightVision = true;
-        else
-            bIsAutoNightVision = false;
-        //CameraDriver::getInstance().setAutoNightVision(bIsAutoNightVision);
-        //CameraDriver::getInstance().setAutoNightVision(bIsAutoNightVision);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("autoNightVision", rapidjson::Value(autoNightVision.c_str(), allocator).Move(), allocator);
-        response.AddMember("autoNightVision", rapidjson::Value(autoNightVision.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定自動夜視時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetSpeak(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定揚聲器: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string speakVolume;
-        int volume = 0;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("speakVolume") && requestJson["speakVolume"].IsString())
-        {
-            speakVolume = requestJson["speakVolume"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: speakVolume");
-        }
-
-        // 驗證speakVolume參數（0~10）
-        try
-        {
-            volume = std::stoi(speakVolume);
-            if (volume < 0 || volume > 10)
-            {
-                throw std::runtime_error("無效的speakVolume參數，必須為0~10之間");
-            }
-        }
-        catch (const std::invalid_argument &)
-        {
-            throw std::runtime_error("speakVolume參數格式錯誤，必須為數字");
-        }
-
-        std::cout << "設定揚聲器 - camId: " << camId
-                  << ", speakVolume: " << speakVolume << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新揚聲器設定到參數管理器
-        paramsManager.setParameter("speakVolume", volume);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "揚聲器設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定揚聲器音量
-        // 例如：
-        int setVolValue = 0;
-        setVolValue = volume * 10;
-        //CameraDriver::getInstance().setSpeakerHardware(true, setVolValue);
-        //CameraDriver::getInstance().setSpeakerHardware(true, setVolValue);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("speakVolume", rapidjson::Value(speakVolume.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定揚聲器時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetFlipUpDown(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定上下翻轉: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string isFlipUpDown;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("isFlipUpDown") && requestJson["isFlipUpDown"].IsString())
-        {
-            isFlipUpDown = requestJson["isFlipUpDown"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: isFlipUpDown");
-        }
-
-        // 驗證isFlipUpDown參數
-        if (isFlipUpDown != "0" && isFlipUpDown != "1")
-        {
-            throw std::runtime_error("無效的isFlipUpDown參數，必須為0(關閉)或1(開啟)");
-        }
-
-        std::cout << "設定上下翻轉 - camId: " << camId
-                  << ", isFlipUpDown: " << isFlipUpDown << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新上下翻轉設定到參數管理器
-        paramsManager.setParameter("isFlipUpDown", isFlipUpDown);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "上下翻轉設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定上下翻轉
-        // 例如：CameraDriver::getInstance().setFlipUpDown(isFlipUpDown == "1");
-        // ## DEPEND  venc2_msg_sender -f 3 -e 1(影像正)  venc2_msg_sender -f 3 -e 0 (影像反)
-        bool flipUpDown;
-        if (isFlipUpDown == "0")
-            flipUpDown = false;
-        else if (isFlipUpDown == "1")
-            flipUpDown = true;
-        else
-            flipUpDown = false;
-        //CameraDriver::getInstance().setImageFlipHardware(flipUpDown);
-        //CameraDriver::getInstance().setImageFlipHardware(flipUpDown);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("isFlipUpDown", rapidjson::Value(isFlipUpDown.c_str(), allocator).Move(), allocator);
-        response.AddMember("isFlipUpDown", rapidjson::Value(isFlipUpDown.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定上下翻轉時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetLED(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定LED指示燈: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string statusIndicatorLight;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("statusIndicatorLight") && requestJson["statusIndicatorLight"].IsString())
-        {
-            statusIndicatorLight = requestJson["statusIndicatorLight"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: statusIndicatorLight");
-        }
-
-        // 驗證statusIndicatorLight參數
-        if (statusIndicatorLight != "0" && statusIndicatorLight != "1")
-        {
-            throw std::runtime_error("無效的statusIndicatorLight參數，必須為0(關閉)或1(開啟)");
-        }
-
-        std::cout << "設定LED指示燈 - camId: " << camId
-                  << ", statusIndicatorLight: " << statusIndicatorLight << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新LED指示燈設定到參數管理器
-        paramsManager.setParameter("statusIndicatorLight", statusIndicatorLight);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "LED指示燈設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定LED指示燈
-        // 例如：CameraDriver::getInstance().setStatusLED(statusIndicatorLight == "1");
-        bool bLedEnabled;
-        if (statusIndicatorLight == "0")
-            bLedEnabled = false;
-        else if (statusIndicatorLight == "1")
-            bLedEnabled = true;
-        else
-            bLedEnabled = false;
-        //CameraDriver::getInstance().setStatusLEDHardware(bLedEnabled);
-        //CameraDriver::getInstance().setStatusLEDHardware(bLedEnabled);
-
-        // 構建成功回應
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("statusIndicatorLight", rapidjson::Value(statusIndicatorLight.c_str(), allocator).Move(), allocator);
-        response.AddMember("statusIndicatorLight", rapidjson::Value(statusIndicatorLight.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定LED指示燈時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetCameraPower(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定攝影機電源: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string camera;
-
-        // 獲取請求參數
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-        if (requestJson.HasMember("camera") && requestJson["camera"].IsString())
-        {
-            camera = requestJson["camera"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: camera");
-        }
-
-        // 驗證camera參數
-        if (camera != "0" && camera != "1")
-        {
-            throw std::runtime_error("無效的camera參數，必須為0(關閉)或1(開啟)");
-        }
-
-        std::cout << "設定攝影機電源 - camId: " << camId
-                  << ", camera: " << camera << std::endl;
-
-        // 獲取參數管理器
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證 camId（如果提供的話）
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 更新攝影機電源設定到參數管理器
-        paramsManager.setParameter("cameraPower", camera);
-
-        // 保存設定到檔案
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "攝影機電源設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 這裡應該調用實際的攝影機驅動來設定電源狀態
-        // 例如：CameraDriver::getInstance().setCameraPower(camera == "1");
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("camera", rapidjson::Value(camera.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定攝影機電源時發生異常: " << e.what() << std::endl;
-
-        // 構建失敗回應
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleGetSnapshotHamiCamDevice(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理取得快照: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        // 獲取請求參數
-        std::string eventId;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_EVENT_ID);
-        if (it == requestJson.MemberEnd() || !it->value.IsString()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_EVENT_ID));
-        }
-        eventId = it->value.GetString();
-
-#if 0
-        const std::string& currentCamId = paramsManager.getCameraId();
-        std::string snapshotTime, filePath;
-        int result;
-        std::tie(result, snapshotTime, filePath) = CameraDriver::getInstance().getSnapshot(currentCamId);
-
-        std::cout << "快照請求 - eventId: " << eventId << std::endl;
-#endif
-
-        // 先回應準備截圖訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("description", rapidjson::Value("準備截圖", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理快照請求時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
 // 內部測試函數 - 驗證參數設定結果
 static bool verifyParameterSetting(const std::string &paramName, const std::string &expectedValue)
 {
@@ -3497,1716 +4735,6 @@ static bool verifyParameterSetting(const std::string &paramName, const std::stri
     }
 }
 
-// 內部測試函數 - 模擬控制命令執行
-static bool simulateControlExecution(CHTP2P_ControlType controlType, const std::string &testPayload)
-{
-    try
-    {
-        std::cout << "模擬執行控制命令: " << controlType << std::endl;
-
-        auto &handler = ChtP2PCameraControlHandler::getInstance();
-        std::string response = handler.handleControl(controlType, testPayload);
-
-        // 解析回應檢查是否成功
-        rapidjson::Document responseJson;
-        rapidjson::ParseResult parseResult = responseJson.Parse(response.c_str());
-        rapidjson::Document responseJson;
-        rapidjson::ParseResult parseResult = responseJson.Parse(response.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "回應解析失敗" << std::endl;
-            return false;
-        }
-
-        if (responseJson.HasMember(PAYLOAD_KEY_RESULT) && responseJson[PAYLOAD_KEY_RESULT].IsInt())
-        {
-            int result = responseJson[PAYLOAD_KEY_RESULT].GetInt();
-            std::cout << "控制命令執行結果: " << (result == 1 ? "成功" : "失敗") << std::endl;
-            return result == 1;
-        }
-
-        return false;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "模擬控制命令執行異常: " << e.what() << std::endl;
-        return false;
-    }
-}
-std::string ChtP2PCameraControlHandler::handleRestartHamiCamDevice(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理重啟設備: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        std::cout << "重啟請求 - camId: " << camId << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 先回應準備重啟訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("description", rapidjson::Value("準備reboot", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        // 設置裝置狀態為未執行，因為要重開機了
-        paramsManager.setParameter("deviceStatus", std::string("0"));
-        paramsManager.saveToFile();
-
-        // 啟動非同步重啟處理 (等待5秒後重啟)
-        std::thread rebootThread([]() {
-            try
-            {
-                std::cout << "等待5秒後重啟設備..." << std::endl;
-                std::this_thread::sleep_for(std::chrono::seconds(5));
-#if 0
-                // 檢查是否為模擬模式
-                if (CameraDriver::getInstance().isSimulationMode())
-                {
-                    std::cout << "模擬模式：模擬重啟完成" << std::endl;
-                }
-                else
-                {
-                    std::cout << "執行系統重啟..." << std::endl;
-                    executeSystemCommand("reboot");
-                }
-#endif
-            }
-            catch (const std::exception &e)
-            {
-                std::cerr << "重啟處理執行緒異常: " << e.what() << std::endl;
-            }
-        });
-
-        rebootThread.detach();
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理重啟請求時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetCamStorageDay(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定儲存天數: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string storageDay;
-
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        if (requestJson.HasMember("storageDay") && requestJson["storageDay"].IsString())
-        {
-            storageDay = requestJson["storageDay"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: storageDay");
-        }
-
-        std::cout << "設定雲存天數 - camId: " << camId << ", storageDay: " << storageDay << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 驗證 storageDay 數值
-        try
-        {
-            int days = std::stoi(storageDay);
-            if (days < 0 || days > 365)
-            {
-                throw std::runtime_error("雲存天數必須在0-365天之間");
-            }
-        }
-        catch (const std::invalid_argument &)
-        {
-            throw std::runtime_error("雲存天數格式錯誤");
-        }
-
-        // 更新雲存天數設定
-        paramsManager.setParameter("storageDay", storageDay);
-        paramsManager.saveToFile();
-
-        // 回應成功
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("storageDay", rapidjson::Value(storageDay.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定雲存天數時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleSetCamEventStorageDay(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理設定事件儲存天數: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string eventStorageDay;
-
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        if (requestJson.HasMember("eventStorageDay") && requestJson["eventStorageDay"].IsString())
-        {
-            eventStorageDay = requestJson["eventStorageDay"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: eventStorageDay");
-        }
-
-        std::cout << "設定事件雲存天數 - camId: " << camId << ", eventStorageDay: " << eventStorageDay << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 驗證 eventStorageDay 數值
-        try
-        {
-            int days = std::stoi(eventStorageDay);
-            if (days < 0 || days > 365)
-            {
-                throw std::runtime_error("事件雲存天數必須在0-365天之間");
-            }
-        }
-        catch (const std::invalid_argument &)
-        {
-            throw std::runtime_error("事件雲存天數格式錯誤");
-        }
-
-        // 更新事件雲存天數設定
-        paramsManager.setParameter("eventStorageDay", eventStorageDay);
-        paramsManager.saveToFile();
-
-        // 回應成功
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("eventStorageDay", rapidjson::Value(eventStorageDay.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定事件雲存天數時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamFormatSDCard(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理格式化SD卡: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        std::cout << "SD卡格式化請求 - camId: " << camId << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 先回應準備格式化訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("description", rapidjson::Value("準備SD格式化", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        // 啟動非同步格式化處理
-        std::thread formatThread([]() {
-            try
-            {
-                std::cout << "開始SD卡格式化..." << std::endl;
-#if 0
-#if 0
-                if (CameraDriver::getInstance().isSimulationMode()) {
-                    std::cout << "模擬模式：模擬SD卡格式化" << std::endl;
-                    std::this_thread::sleep_for(std::chrono::seconds(3));
-                    std::cout << "模擬SD卡格式化完成" << std::endl;
-                    return;
-                }
-#endif
-#endif
-                // 步驟 1: 停止 SD 卡檢查服務
-                std::cout << "停止 SD 卡檢查服務..." << std::endl;
-                executeSystemCommand("/etc/init.d/S98SdcardChecker stop");
-                std::this_thread::sleep_for(std::chrono::seconds(2)); // 等待服務完全停止
-
-                const char *dev = "/dev/mmcblk0";
-                const char *part = "/dev/mmcblk0p1";
-                const char *mount_point = "/mnt/sd";
-
-                // 檢查 SD 卡設備是否存在
-                if (access(dev, F_OK) != 0) {
-                    std::cerr << "找不到 SD 卡裝置: " << dev << std::endl;
-                    // 重新啟動服務後退出
-                    executeSystemCommand("/etc/init.d/S98SdcardChecker start");
-                    return;
-                }
-
-                // 步驟 2: 卸載 SD 卡
-                std::cout << "檢查並卸載 SD 卡..." << std::endl;
-
-
-                // 首先嘗試卸載 /mnt/sd/0 (如果存在)
-                if (system("mount | grep /mnt/sd/0") == 0)
-                if (system("mount | grep /mnt/sd/0") == 0)
-                {
-                    std::cout << "發現 /mnt/sd/0 掛載，嘗試卸載..." << std::endl;
-                    executeSystemCommand("fuser -k /mnt/sd/0 2>/dev/null");
-                    int ret = system("umount /mnt/sd/0 2>/dev/null");
-                    if (ret == 0) {
-                        std::cout << "/mnt/sd/0 卸載成功" << std::endl;
-                    } else {
-                        std::cout << "/mnt/sd/0 卸載失敗，但繼續處理" << std::endl;
-                    }
-                }
-
-
-                // 然後檢查並卸載 /mnt/sd
-                if (system("mount | grep /mnt/sd") == 0)
-                if (system("mount | grep /mnt/sd") == 0)
-                {
-                    std::cout << "SD 卡已掛載，嘗試卸載..." << std::endl;
-                    // 終止占用進程
-                    executeSystemCommand("fuser -k /mnt/sd 2>/dev/null");
-                    // 執行卸載
-                    int ret = system("umount /mnt/sd 2>/dev/null");
-                    if (ret != 0) {
-                        std::cerr << "卸載 SD 卡失敗" << std::endl;
-                        // 重新啟動服務後退出
-                        executeSystemCommand("/etc/init.d/S98SdcardChecker start");
-                        return;
-                    }
-                    std::cout << "SD 卡卸載成功" << std::endl;
-                }
-
-                // 同步檔案系統
-                executeSystemCommand("sync");
-
-                // 檢查是否已有分割區
-                std::cout << "檢查是否已有 partition..." << std::endl;
-                bool hasPartition = (access(part, F_OK) == 0);
-                std::cout << (hasPartition ? "已有分割區，將重新建立" : "無分割區，將建立新的") << std::endl;
-
-                // 刪除並建立新分割區（非互動 fdisk）
-                int ret = system("echo -e \"o\\nn\\np\\n1\\n\\n\\nw\" | fdisk /dev/mmcblk0");
-                if (ret != 0) {
-                    std::cerr << "fdisk 建立分割區失敗" << std::endl;
-                    return;
-                }
-
-                // 通知內核重新讀取分割區表
-                executeSystemCommand("partprobe /dev/mmcblk0");
-                sleep(2); // 增加等待時間以確保設備節點更新
-
-                if (access(part, F_OK) != 0) {
-                    std::cerr << "找不到新分割區: " << part << std::endl;
-                    return;
-                }
-                // 設定卷標
-                time_t now = time(nullptr);
-                struct tm *ltm = localtime(&now);
-                char label[32];
-                snprintf(label, sizeof(label), "HAMI_%02d%02d%02d",
-                        (ltm->tm_year + 1900) % 100, 1 + ltm->tm_mon, ltm->tm_mday);
-
-                // 格式化為 exFAT
-                char cmd[128];
-                snprintf(cmd, sizeof(cmd), "mkfs.exfat -n %s /dev/mmcblk0p1", label);
-                std::cout << "格式化命令: " << cmd << std::endl;
-
-                std::cout << "開始格式化為 exFAT..." << std::endl;
-                ret = system(cmd);
-                if (ret != 0) {
-                    std::cerr << "格式化 exFAT 失敗" << std::endl;
-                    return;
-                }
-
-                std::cout << "格式化成功，重新掛載..." << std::endl;
-                executeSystemCommand("mkdir -p /mnt/sd");
-                ret = system("mount /dev/mmcblk0p1 /mnt/sd");
-                if (ret != 0) {
-                    std::cerr << "重新掛載 SD 卡失敗" << std::endl;
-                    return;
-                }
-
-                // 建立標記檔案
-                char filename[64];
-                snprintf(filename, sizeof(filename), "/mnt/sd/.zw_cht730_%04d%02d%02d",1900 + ltm->tm_year, 1 + ltm->tm_mon, ltm->tm_mday);
-
-                std::ofstream outFile(filename);
-                if (outFile.is_open())
-                if (outFile.is_open())
-                {
-                    outFile << "created by CHT format handler on "
-                            << (1900 + ltm->tm_year) << "-"
-                            << (1 + ltm->tm_mon) << "-"
-                            << ltm->tm_mday;
-                    outFile.close();
-                    std::cout << "建立新標記檔案: " << filename << std::endl;
-                } else {
-                    std::cerr << "無法建立標記檔案: " << filename << std::endl;
-                }
-
-                // 步驟 3: 重新啟動 SD 卡檢查服務
-                std::cout << "重新啟動 SD 卡檢查服務..." << std::endl;
-                executeSystemCommand("/etc/init.d/S98SdcardChecker start");
-                std::cout << "SD 卡格式化程序完成" << std::endl;
-            }
-            catch (const std::exception &e)
-            {
-                std::cerr << "SD卡格式化執行緒異常: " << e.what() << std::endl;
-                // 確保在發生異常時也重新啟動服務
-                std::cout << "異常處理：重新啟動 SD 卡檢查服務..." << std::endl;
-                executeSystemCommand("/etc/init.d/S98SdcardChecker start");
-            }
-        });
-
-        formatThread.detach();
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理SD卡格式化時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlMove(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理PTZ移動控制: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        // 驗證PTZ命令
-        std::string cmd;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_CMD);
-        if (it == requestJson.MemberEnd() || !it->value.IsString()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_CMD));
-        }
-        cmd = it->value.GetString();
-
-#if 0
-        auto &driver = CameraDriver::getInstance();
-        if (!driver.validatePTZCmd(cmd))
-        {
-            throw std::runtime_error("無效的PTZ命令");
-        }
-
-        std::cout << "執行PTZ命令 - cmd: " << cmd << std::endl;
-
-        // 執行PTZ控制
-        bool success = driver.setPTZControlMove(cmd);
-
-        // 儲存PTZ狀態
-        paramsManager.setParameter("lastPtzCommand", cmd);
-        paramsManager.setParameter("ptzStatus", success ? "4" : "0");
-        paramsManager.saveToFile();
-#endif
-        bool success = true; // 假設成功
-
-        // 構建成功回應 - 使用 rapidjson
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_CMD, rapidjson::Value(cmd.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_CMD, rapidjson::Value(cmd.c_str(), allocator).Move(), allocator);
-        if (success)
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("Send OK", allocator).Move(), allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("Send OK", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "PTZ移動控制回應: " << responseStr << std::endl;
-
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: PTZ控制異常: " << e.what() << std::endl;
-        std::string desc = std::string("PTZ控制異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigSpeed(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理PTZ速度設定: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        int speed = 0;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_SPEED);
-        if (it == requestJson.MemberEnd() || !it->value.IsInt()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_SPEED));
-        }
-        speed = it->value.GetInt();
-
-        // 驗證速度範圍
-        if (speed < 0 || speed > 2)
-        {
-            throw std::runtime_error("PTZ速度必須在0-2之間");
-        }
-
-        std::cout << "PTZ速度設定 - speed: " << speed << std::endl;
-
-#if 0
-        // 設定PTZ速度
-        bool success = CameraDriver::getInstance().setPTZSpeed(speed);
-
-
-        // 儲存PTZ速度設定
-        paramsManager.setParameter("ptzSpeed", std::to_string(speed));
-        paramsManager.saveToFile();
-#endif
-        bool success = true; // 假設成功
-
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_SPEED, speed, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "PTZ速度設定時發生異常: " << e.what() << std::endl;
-        std::string desc = std::string("PTZ速度設定時發生異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamGetPtzControl(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理獲取PTZ控制資訊: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        int iTourStayTime = 0;
-        int iSpeed = 0;
-        int iSpeed = 0;
-        int iHumanTrackingSetting = 0;
-        int iPetTrackingSetting = 0;
-        int iPetTrackingSetting = 0;
-        int iStatus = 0;
-        int iPetStatus = 0;
-
-#if 0
-        bool success = CameraDriver::getInstance().getPTZStatus(
-                &iTourStayTime, &iSpeed, &iHumanTrackingSetting, &iPetTrackingSetting, &iStatus, &iPetStatus);
-
-
-        std::cout << " success " << success
-                << " iTourStayTime " << iTourStayTime
-                << " iSpeed " << iSpeed
-                << " iHumanTrackingSetting " << iHumanTrackingSetting
-                << " iPetTrackingSetting " << iPetTrackingSetting
-                << " iStatus " << iStatus
-                << " iPetStatus " << iPetStatus
-                << std::endl;
-        if (!success) {
-            throw std::runtime_error("Get PTZ agent status error!!!");
-        }
-#endif
-        std::string ptzTourStayTime = std::to_string(iTourStayTime);
-        std::string speed = std::to_string(iSpeed);
-        std::string humanTracking = std::to_string(iHumanTrackingSetting);
-        std::string petTracking = std::to_string(iPetTrackingSetting);
-        std::string ptzStatus = std::to_string(iStatus);
-        std::string ptzPetStatus = std::to_string(iPetStatus);
-
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember(PAYLOAD_KEY_PTZ_TOUR_STAY_TIME, rapidjson::Value(ptzTourStayTime.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_SPEED, rapidjson::Value(speed.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_HUMAN_TRACKING, rapidjson::Value(humanTracking.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PET_TRACKING, rapidjson::Value(petTracking.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PTZ_STATUS, rapidjson::Value(ptzStatus.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PTZ_PET_STATUS, rapidjson::Value(ptzPetStatus.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PTZ_TOUR_STAY_TIME, rapidjson::Value(ptzTourStayTime.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_SPEED, rapidjson::Value(speed.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_HUMAN_TRACKING, rapidjson::Value(humanTracking.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PET_TRACKING, rapidjson::Value(petTracking.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PTZ_STATUS, rapidjson::Value(ptzStatus.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_PTZ_PET_STATUS, rapidjson::Value(ptzPetStatus.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: 獲取PTZ控制資訊時發生異常: " << e.what() << std::endl;
-        std::string desc = std::string("獲取PTZ控制資訊時發生異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlTourGo(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理PTZ巡航: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        // 驗證PTZ命令
-        std::string indexSequence;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_INDEX_SEQUENCE);
-        if (it == requestJson.MemberEnd() || !it->value.IsString()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_INDEX_SEQUENCE));
-        }
-        indexSequence = it->value.GetString();
-        if (indexSequence.empty())
-        {
-            throw std::runtime_error("巡航路徑不能為空");
-        }
-
-        std::cout << "INFO: 設定PTZ巡航路徑: " << indexSequence << std::endl;
-
-#if 0
-        // 執行PTZ巡航
-        bool success = CameraDriver::getInstance().setPTZGoTour(indexSequence);
-
-        // 儲存PTZ巡航設定
-        paramsManager.setParameter("ptzTourSequence", indexSequence);
-        paramsManager.setParameter("ptzStatus", "2"); // 巡航狀態
-        paramsManager.saveToFile();
-#endif
-        bool success = true; // 假設成功
-
-        // 構建成功回應 - 使用 rapidjson
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_INDEX_SEQUENCE, rapidjson::Value(indexSequence.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_INDEX_SEQUENCE, rapidjson::Value(indexSequence.c_str(), allocator).Move(), allocator);
-        if (success)
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("Send OK", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "PTZ巡航控制回應: " << responseStr << std::endl;
-
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: PTZ巡航模式異常: " << e.what() << std::endl;
-        std::string desc = std::string("PTZ巡航模式異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlGoPst(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理PTZ移動到預設點: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        // 驗證預設點範圍
-        int index;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_POSITION_INDEX);
-        if (it == requestJson.MemberEnd() || !it->value.IsInt()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_POSITION_INDEX));
-        }
-        index = it->value.GetInt();
-
-
-        if (index < 1 || index > 4)
-        {
-            throw std::runtime_error("PTZ移動到預設點必須在1-4之間");
-        }
-
-        std::cout << "PTZ移動到預設點 - index: " << index << std::endl;
-#if 0
-#if 0
-        // 設定PTZ移動到預設點
-        bool success = CameraDriver::getInstance().setPTZGoPositionPoint(index);
-
-
-        // 儲存PTZ移動設定
-        // paramsManager.setParameter("ptzindex", std::to_string(index));
-        paramsManager.setParameter("ptzStatus", "4");
-        paramsManager.saveToFile();
-
-        // 構建成功回應 - 使用 rapidjson
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_POSITION_INDEX, index, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "PTZ控制成功回應: " << responseStr << std::endl;
-
-        return responseStr;
-#endif
-#endif
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: PTZ移動到預設點發生異常: " << e.what() << std::endl;
-        std::string desc = std::string("PTZ移動到預設點發生異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-
-    return "";
-
-    return "";
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigPst(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理PTZ設定預設點: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        // 驗證預設點範圍
-        int index;
-        std::string remove;
-        std::string positionName;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_POSITION_INDEX);
-        if (it == requestJson.MemberEnd() || !it->value.IsInt()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_POSITION_INDEX));
-        }
-        index = it->value.GetInt();
-
-
-        it = requestJson.FindMember(PAYLOAD_KEY_REMOVE);
-        if (it == requestJson.MemberEnd() || !it->value.IsString()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_REMOVE));
-        }
-        remove = it->value.GetString();
-
-        it = requestJson.FindMember(PAYLOAD_KEY_POSITION_NAME);
-        if (it == requestJson.MemberEnd() || !it->value.IsString()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_POSITION_NAME));
-        }
-        positionName = it->value.GetString();
-
-        if (index < 1 || index > 4)
-        {
-            throw std::runtime_error("PTZ預設點必須在1-4之間");
-        }
-        if (!(remove == "1" || remove == "0"))
-        {
-            throw std::runtime_error("PTZ預設點參數remove數值不正確");
-        }
-
-        std::cout << "PTZ設定預設點 - index: " << index << ", remove: " << remove << ", positionName: " << positionName << std::endl;
-
-        // 設定PTZ預設點
-        //bool success = CameraDriver::getInstance().setPTZPositionPoint(index, (remove == "1"), positionName);
-        // 儲存PTZ預設點名稱
-        // positionNameNum = positionName1 or positionName2 or positionName3 or positionName4
-        std::string positionNameNum = "positionName" + std::to_string(index);
-        if (remove == "0")
-            paramsManager.setParameter(positionNameNum, positionName.c_str());
-        else if (remove == "1")
-            paramsManager.setParameter(positionNameNum, " ");
-        paramsManager.saveToFile();
-
-        bool success = true; // 假設成功
-
-        // 構建成功回應 - 使用 rapidjson
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_POSITION_INDEX, index, allocator);
-        response.AddMember(PAYLOAD_KEY_REMOVE, rapidjson::Value(remove.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_POSITION_NAME, rapidjson::Value(positionName.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_REMOVE, rapidjson::Value(remove.c_str(), allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_POSITION_NAME, rapidjson::Value(positionName.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "PTZ控制成功回應: " << responseStr << std::endl;
-
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: PTZ設定預設點發生異常: " << e.what() << std::endl;
-        std::string desc = std::string("PTZ設定預設點發生異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-
-    return "";
-
-    return "";
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamHumanTracking(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理人體追蹤開關: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        int val = 0;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_VAL);
-        if (it == requestJson.MemberEnd() || !it->value.IsInt()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_VAL));
-        }
-        val = it->value.GetInt();
-
-        // 驗證開關範圍
-        if (val < 0 || val > 2)
-        {
-            throw std::runtime_error("人體追蹤開關必須在0-2之間");
-        }
-
-        std::cout << "人體追蹤開關 - val: " << val << std::endl;
-
-        // 設定人體追蹤開關
-        //bool success = CameraDriver::getInstance().setPTZHumanTracking(val);
-
-        // 儲存人體追蹤開關設定
-        paramsManager.setParameter("humanTracking", std::to_string(val));
-        paramsManager.saveToFile();
-
-        // send ai setting to host_stream
-        //CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
-
-        bool success = true; // 假設成功
-
-        // 構建成功回應 - 使用 rapidjson
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "PTZ控制成功回應: " << responseStr << std::endl;
-
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: 設定人體追蹤開關發生異常: " << e.what() << std::endl;
-        std::string desc = std::string("設定人體追蹤開關發生異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleHamiCamPetTracking(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理寵物追蹤開關: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        int val = 0;
-        auto it = requestJson.FindMember(PAYLOAD_KEY_VAL);
-        if (it == requestJson.MemberEnd() || !it->value.IsInt()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_VAL));
-        }
-        val = it->value.GetInt();
-
-        // 驗證開關範圍
-        if (val < 0 || val > 2)
-        {
-            throw std::runtime_error("寵物追蹤開關必須在0-2之間");
-        }
-
-        std::cout << "寵物追蹤開關 - val: " << val << std::endl;
-
-        //bool success = CameraDriver::getInstance().setPTZPetTracking(val);
-
-        // 儲存寵物追蹤開關設定
-        paramsManager.setParameter("petTracking", std::to_string(val));
-        paramsManager.saveToFile();
-
-        // send ai setting to host_stream
-        //CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
-
-        bool success = true; // 假設成功
-
-        // 構建成功回應 - 使用 rapidjson
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, success ? 1 : 0, allocator);
-        response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "PTZ控制成功回應: " << responseStr << std::endl;
-
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應 - 使用 rapidjson
-        std::cerr << "ERROR: 設定寵物追蹤開關發生異常: " << e.what() << std::endl;
-        std::string desc = std::string("設定寵物追蹤開關發生異常: ") + e.what();
-
-        return createErrorResponse(desc);
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleGetHamiCamBindList(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理獲取綁定清單: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求JSON
-        rapidjson::Document request;
-        rapidjson::ParseResult parseResult = request.Parse(payload.c_str());
-        rapidjson::Document request;
-        rapidjson::ParseResult parseResult = request.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            throw std::runtime_error("JSON解析失敗: " + std::string(rapidjson::GetParseError_En(parseResult.Code())));
-            throw std::runtime_error("JSON解析失敗: " + std::string(rapidjson::GetParseError_En(parseResult.Code())));
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(request, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-
-        std::string camId = request["camId"].GetString();
-        std::cout << "INFO: 處理攝影機ID: " << camId << std::endl;
-
-        // 檢查是否為模擬模式
-        //auto &driver = CameraDriver::getInstance();
-        //bool isSimulationMode = driver.isSimulationMode();
-        bool isSimulationMode = false; // 假設非模擬模式
-
-        // 讀取WiFi設定
-        std::string wifiSsid = "";
-        std::string wifiPassword = "";
-
-
-        if (isSimulationMode)
-        {
-            wifiSsid = "testSsid";
-            wifiPassword = "1234567890";
-        }
-        else
-        {
-            //wifiSsid = driver.getWifiSsid();
-            //wifiPassword = driver.getWifiPassword();
-        }
-
-        if (wifiSsid.empty())
-        {
-            throw std::runtime_error("無法讀取WiFi SSID");
-        }
-        else if (wifiPassword.empty())
-        {
-            throw std::runtime_error("無法取得WiFi密碼");
-        }
-
-        // Base64編碼密碼
-        std::string encodedPassword = base64_encode(wifiPassword);
-        if (encodedPassword.empty())
-        {
-            throw std::runtime_error("Base64編碼失敗");
-        }
-
-        // 建立成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("wifiSsid", rapidjson::Value(wifiSsid.c_str(), allocator).Move(), allocator);
-        response.AddMember("pswd", rapidjson::Value(encodedPassword.c_str(), allocator).Move(), allocator);
-        response.AddMember("wifiSsid", rapidjson::Value(wifiSsid.c_str(), allocator).Move(), allocator);
-        response.AddMember("pswd", rapidjson::Value(encodedPassword.c_str(), allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::cout << "INFO: 成功取得WiFi資訊 - SSID: " << wifiSsid << std::endl;
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "ERROR: handleGetHamiCamBindList異常: " << e.what() << std::endl;
-        return createErrorResponse(e.what());
-    }
-}
-
-std::string ChtP2PCameraControlHandler::handleUpgradeHamiCamOTA(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理OTA升級: " << payload << std::endl;
-
-    rapidjson::Document response;
-    response.SetObject();
-    rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-    try
-    {
-        // 步驟 1: 解析輸入的 JSON payload
-        rapidjson::Document request;
-        rapidjson::ParseResult parseResult = request.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "ERROR: JSON 解析失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-            response.AddMember("description", rapidjson::Value("JSON 格式錯誤", allocator).Move(), allocator);
-            goto send_response;
-        }
-
-        // 步驟 2: 驗證必要欄位
-        if (!request.HasMember(PAYLOAD_KEY_CAMID) || !request[PAYLOAD_KEY_CAMID].IsString() ||
-            !request.HasMember(PAYLOAD_KEY_UPGRADE_MODE) || !request[PAYLOAD_KEY_UPGRADE_MODE].IsString() ||
-            !request.HasMember(PAYLOAD_KEY_FILE_PATH) || !request[PAYLOAD_KEY_FILE_PATH].IsString())
-        {
-
-            std::string errorMsg = "缺少必要欄位 (" PAYLOAD_KEY_CAMID ", " PAYLOAD_KEY_UPGRADE_MODE ", " PAYLOAD_KEY_FILE_PATH ")";
-            return createErrorResponse(errorMsg);
-        }
-
-        std::string camId = request[PAYLOAD_KEY_CAMID].GetString();
-        std::string upgradeMode = request[PAYLOAD_KEY_UPGRADE_MODE].GetString();
-        std::string filePath = request[PAYLOAD_KEY_FILE_PATH].GetString();
-
-        // 檢查欄位是否為空
-        if (camId.empty() || upgradeMode.empty() || filePath.empty())
-        {
-            std::cerr << "ERROR: 有欄位為空值" << std::endl;
-            response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("參數不能為空", allocator).Move(), allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("參數不能為空", allocator).Move(), allocator);
-            goto send_response;
-        }
-
-        // 驗證 upgradeMode 值
-        if (upgradeMode != "0" && upgradeMode != "1")
-        {
-            std::cerr << "ERROR: upgradeMode 值無效: " << upgradeMode << std::endl;
-            response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("更新模式參數無效", allocator).Move(), allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("更新模式參數無效", allocator).Move(), allocator);
-            goto send_response;
-        }
-
-        std::cout << "INFO: 攝影機ID: " << camId << std::endl;
-        std::cout << "INFO: 更新模式: " << (upgradeMode == "0" ? "立即更新" : "閒置時更新") << std::endl;
-        std::cout << "INFO: 韌體檔案路徑: " << filePath << std::endl;
-
-        // 步驟 3: 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        std::string currentCamId = paramsManager.getCameraId();
-        if (camId != currentCamId)
-        {
-            std::cerr << "ERROR: 請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-            response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("攝影機 ID 不符", allocator).Move(), allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("攝影機 ID 不符", allocator).Move(), allocator);
-            goto send_response;
-        }
-
-        // 步驟 4: 驗證韌體檔案
-        if (!validateFirmwareFile(filePath))
-        {
-            response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("韌體檔案驗證失敗", allocator).Move(), allocator);
-            response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("韌體檔案驗證失敗", allocator).Move(), allocator);
-            goto send_response;
-        }
-
-        // 步驟 5: 檢查系統狀態（磁碟空間等）
-        struct statvfs diskInfo;
-        if (statvfs("/", &diskInfo) == 0)
-        {
-            unsigned long long freeSpace = (unsigned long long)diskInfo.f_bavail * diskInfo.f_frsize;
-            unsigned long long requiredSpace = 50 * 1024 * 1024; // 假設需要 50MB 空間
-
-            if (freeSpace < requiredSpace)
-            {
-                std::cerr << "ERROR: 磁碟空間不足，可用空間: " << (freeSpace / 1024 / 1024) << "MB" << std::endl;
-                response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-                response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("儲存空間不足", allocator).Move(), allocator);
-                response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("儲存空間不足", allocator).Move(), allocator);
-                goto send_response;
-            }
-        }
-
-        // 步驟 6: 準備 OTA 更新
-        std::cout << "INFO: 準備執行 OTA 更新..." << std::endl;
-
-        // 如果是立即更新模式，設定背景任務
-        if (upgradeMode == "0")
-        {
-            std::cout << "INFO: 立即更新模式，將在回應後 5 秒開始更新" << std::endl;
-
-            // 啟動背景執行緒執行 OTA 更新
-            std::thread otaThread([filePath]()
-                                  {
-                try {
-                    std::this_thread::sleep_for(std::chrono::seconds(5));
-                    std::cout << "INFO: 開始執行 OTA 更新..." << std::endl;
-
-
-                    // 檢查是否為模擬模式
-                    //if (CameraDriver::getInstance().isSimulationMode()) {
-                    //    std::cout << "INFO: 模擬模式：模擬 OTA 更新完成" << std::endl;
-                    //} else
-                    {
-                        // 執行實際的 OTA 更新命令
-                        std::string otaCmd = "sysupgrade -v " + filePath;
-                        std::cout << "INFO: 執行 OTA 命令: " << otaCmd << std::endl;
-                        int result = system(otaCmd.c_str());
-                        if (result == 0) {
-                            std::cout << "INFO: OTA 更新執行成功" << std::endl;
-                        } else {
-                            std::cerr << "ERROR: OTA 更新執行失敗，錯誤碼: " << result << std::endl;
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    std::cerr << "ERROR: OTA 更新執行緒異常: " << e.what() << std::endl;
-                } });
-            otaThread.detach();
-        }
-        else
-        {
-            std::cout << "INFO: 閒置更新模式，將在系統閒置時執行更新" << std::endl;
-            // 這裡可以註冊一個閒置時的回調函數或寫入排程檔案
-        }
-
-        // 步驟 7: 建立成功回應
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("準備更新OTA", allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("準備更新OTA", allocator).Move(), allocator);
-
-        std::cout << "INFO: OTA 更新請求處理成功" << std::endl;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "ERROR: handleUpgradeHamiCamOTA 發生未預期的例外: " << e.what() << std::endl;
-        response.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-        response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("系統內部錯誤", allocator).Move(), allocator);
-        response.AddMember(PAYLOAD_KEY_DESCRIPTION, rapidjson::Value("系統內部錯誤", allocator).Move(), allocator);
-    }
-
-send_response:
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    response.Accept(writer);
-
-    std::string responseStr = buffer.GetString();
-    std::cout << "INFO: 送出回應: " << responseStr << std::endl;
-
-    return responseStr;
-}
-
-std::string ChtP2PCameraControlHandler::handleUpdateCameraAISetting(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理更新AI設定: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError() || !requestJson.IsObject())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON格式錯誤");
-        }
-
-        auto &paramsManager = CameraParametersManager::getInstance();
-
-        // 驗證camId
-        std::string errorMsg;
-        if (!validateCamId(requestJson, paramsManager.getCameraId(), errorMsg))
-        {
-            throw std::runtime_error(errorMsg);
-        }
-
-        // 提取AI設定並保存
-        // check AI settings object exist.
-        auto it = requestJson.FindMember(PAYLOAD_KEY_HAMI_AI_SETTINGS);
-        if (it == requestJson.MemberEnd() || !it->value.IsObject()) {
-            throw std::runtime_error(std::string("缺少必要欄位: ") + std::string(PAYLOAD_KEY_HAMI_AI_SETTINGS));
-        }
-
-        // 將整個 hamiAiSettings 物件轉換為字串儲存
-        rapidjson::StringBuffer aiSettingsBuffer;
-        rapidjson::Writer<rapidjson::StringBuffer> aiSettingsWriter(aiSettingsBuffer);
-
-
-        if (!it->value.Accept(aiSettingsWriter)) {
-            std::cerr << "AI設定序列化失敗" << std::endl;
-            throw std::runtime_error("AI設定序列化失敗");
-        }
-
-        std::string aiSettingsJson(aiSettingsBuffer.GetString(), aiSettingsBuffer.GetSize());
-
-        // 儲存AI設定到參數管理器
-        bool saveResult = false;
-        if (paramsManager.parseHamiAiSettings(aiSettingsJson))
-        {
-            saveResult = paramsManager.saveToFile();
-
-
-            // send ai setting to host_stream
-            //CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
-            //CameraDriver::getInstance().eventUpdateAiSetting(paramsManager);
-        }
-
-        std::cout << "AI設定已更新並儲存: " << aiSettingsJson << std::endl;
-        std::cout << "保存結果: " << (saveResult ? "成功" : "失敗") << std::endl;
-
-        // 返回成功回應
-        return "{\"result\":1,\"description\":\"更新成功\"}";
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "更新AI設定時發生異常: " << e.what() << std::endl;
-        return createErrorResponse(e.what());
-    }
-}
-
-static bool getHamiAISettingsObj(const CameraParametersManager &paramsManager,
-                    rapidjson::Value &outVal, rapidjson::Document::AllocatorType& alloc)
-{
-    bool result = true;
-
-    // reset output
-    outVal.SetObject();
-
-    // 獲取當前的 AI 設定
-    std::string currentAiSettings = paramsManager.getAISettings();
-    std::cout << "當前儲存的AI設定: " << currentAiSettings << std::endl;
-
-    if (currentAiSettings.empty() || currentAiSettings == "{}")
-    {
-        // 如果沒有儲存的設定，從個別參數建立完整的 hamiAiSettings
-
-        // 告警設定 (Alert)
-        auto addAlert = [&](const char *key, bool val) {
-            outVal.AddMember(
-                rapidjson::StringRef(key),
-                rapidjson::Value((val)?"1":"0", alloc),
-                alloc);
-        };
-        addAlert("vmdAlert",        paramsManager.getVmdAlert());
-        addAlert("humanAlert",      paramsManager.getHumanAlert());
-        addAlert("petAlert",        paramsManager.getPetAlert());
-        addAlert("adAlert",         paramsManager.getAdAlert());
-        addAlert("fenceAlert",      paramsManager.getFenceAlert());
-        addAlert("faceAlert",       paramsManager.getFaceAlert());
-        addAlert("fallAlert",       paramsManager.getFallAlert());
-        addAlert("adBabyCryAlert",  paramsManager.getAdBabyCryAlert());
-        addAlert("adSpeechAlert",   paramsManager.getAdSpeechAlert());
-        addAlert("adAlarmAlert",    paramsManager.getAdAlarmAlert());
-        addAlert("adDogAlert",      paramsManager.getAdDogAlert());
-        addAlert("adCatAlert",      paramsManager.getAdCatAlert());
-
-        // 靈敏度設定 (Sen) - 轉換為 int
-        auto addSensitivity = [&](const char *key, int val) {
-            outVal.AddMember(
-                rapidjson::StringRef(key),
-                val,
-                alloc);
-        };
-        addSensitivity("vmdSen",        paramsManager.getVmdSen());
-        addSensitivity("adSen",         paramsManager.getAdSen());
-        addSensitivity("humanSen",      paramsManager.getHumanSen());
-        addSensitivity("faceSen",       paramsManager.getFaceSen());
-        addSensitivity("fenceSen",      paramsManager.getFenceSen());
-        addSensitivity("petSen",        paramsManager.getPetSen());
-        addSensitivity("adBabyCrySen",  paramsManager.getAdBabyCrySen());
-        addSensitivity("adSpeechSen",   paramsManager.getAdSpeechSen());
-        addSensitivity("adAlarmSen",    paramsManager.getAdAlarmSen());
-        addSensitivity("adDogSen",      paramsManager.getAdDogSen());
-        addSensitivity("adCatSen",      paramsManager.getAdCatSen());
-        addSensitivity("fallSen",       paramsManager.getFallSen());
-
-        // 電子圍籬座標
-        auto addFencePos = [&](const char *key, const std::pair<int, int> &val)
-        {
-            rapidjson::Value pos(rapidjson::kObjectType);
-            pos.AddMember("x", val.first, alloc);
-            pos.AddMember("y", val.second, alloc);
-
-
-            outVal.AddMember(
-                rapidjson::StringRef(key),
-                pos.Move(),
-                alloc);
-        };
-        addFencePos("fencePos1", paramsManager.getFencePos1());
-        addFencePos("fencePos2", paramsManager.getFencePos2());
-        addFencePos("fencePos3", paramsManager.getFencePos3());
-        addFencePos("fencePos4", paramsManager.getFencePos4());
-
-        // 圍籬方向
-        outVal.AddMember(
-            rapidjson::StringRef("fenceDir"),
-            rapidjson::Value(paramsManager.getFenceDir().c_str(), alloc),
-            alloc);
-
-        // 人臉識別特徵（暫時空陣列）
-        rapidjson::Value identificationFeatures(rapidjson::kArrayType);
-        outVal.AddMember(
-            rapidjson::StringRef("identificationFeatures"),
-            identificationFeatures,
-            alloc);
-    }
-    else
-    {
-        // 解析已儲存的 AI 設定
-        rapidjson::Document tmp;
-        if (tmp.Parse(currentAiSettings.c_str()).HasParseError() || !tmp.IsObject()) {
-            std::cerr << "解析儲存的AI設定失敗，返回空物件" << std::endl;
-            outVal.SetObject();
-            result = false;
-        } else {
-            outVal.CopyFrom(tmp, alloc); // deep copy to outVal
-        }
-    }
-
-    return result;
-}
-
-std::string ChtP2PCameraControlHandler::handleGetCameraAISetting(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理獲取AI設定: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        // 從請求中獲取 camId
-        std::string camId;
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-
-        // 構建回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-
-        // 解析已儲存的 AI 設定或建立預設值
-        rapidjson::Value aiSettings(rapidjson::kObjectType);
-        if (getHamiAISettingsObj(paramsManager, aiSettings, allocator) == false)
-        {
-            throw std::runtime_error("Get local AI settings error");
-        }
-        // 將 aiSettingsDoc 加入回應
-        response.AddMember("hamiAiSettings", aiSettings, allocator);
-
-        // 序列化回應
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "回應內容: " << responseStr << std::endl;
-        return responseStr;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "獲取AI設定時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-        errorResponse.AddMember("description", rapidjson::Value(e.what(), allocator), allocator);
-        errorResponse.AddMember("description", rapidjson::Value(e.what(), allocator), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
 /**
  * @brief 處理獲取即時影音串流
  */

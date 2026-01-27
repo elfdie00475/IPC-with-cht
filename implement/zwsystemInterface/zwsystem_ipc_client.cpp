@@ -142,568 +142,185 @@ int zwsystem_ipc_setCameraOsd(stSetCameraOsdReq stReq, stSetCameraOsdRep *pRep)
     return ipc_client_executeReqRep<stSetCameraOsdReq, stSetCameraOsdRep>(
                 _SetCameraOSD, stReq, pRep);
 }
-#if 0
-int cht_ipc_setPtzControlMove(const stPtzMoveReq *pReq, stPtzMoveRep *pRep)
+
+int zwsystem_ipc_setFlicker(stSetFlickerReq stReq, stSetFlickerRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _HamiCamPtzControlMove);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stPtzMoveReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stPtzMoveReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _HamiCamPtzControlMove ||
-            u32PayloadSize != sizeof(stPtzMoveRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stPtzMoveRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetFlickerReq, stSetFlickerRep>(
+                _SetFlicker, stReq, pRep);
 }
 
-int cht_ipc_setPtzAbsoluteMove(const stPtzMoveReq *pReq, stPtzMoveRep *pRep)
+int zwsystem_ipc_setMicrophone(stSetMicrophoneReq stReq, stSetMicrophoneRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _PtzAbsoluteMove);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stPtzMoveReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stPtzMoveReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _PtzAbsoluteMove ||
-            u32PayloadSize != sizeof(stPtzMoveRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stPtzMoveRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetMicrophoneReq, stSetMicrophoneRep>(
+                _SetMicrophone, stReq, pRep);
 }
 
-int cht_ipc_setPtzRelativeMove(const stPtzMoveReq *pReq, stPtzMoveRep *pRep)
+int zwsystem_ipc_setNightMode(stSetNightModeReq stReq, stSetNightModeRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _PtzRelativeMove);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stPtzMoveReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stPtzMoveReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _PtzRelativeMove ||
-            u32PayloadSize != sizeof(stPtzMoveRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stPtzMoveRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetNightModeReq, stSetNightModeRep>(
+                _SetNightMode, stReq, pRep);
 }
 
-int cht_ipc_setPtzContinuousMove(const stPtzMoveReq *pReq, stPtzMoveRep *pRep)
+int zwsystem_ipc_setAutoNightVision(stSetAutoNightVisionReq stReq, stSetAutoNightVisionRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _PtzContinuousMove);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stPtzMoveReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stPtzMoveReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _PtzContinuousMove ||
-            u32PayloadSize != sizeof(stPtzMoveRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stPtzMoveRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetAutoNightVisionReq, stSetAutoNightVisionRep>(
+                _SetAutoNightVision, stReq, pRep);
 }
 
-int cht_ipc_setNightMode(const stNightModeReq *pReq, stNightModeRep *pRep)
+int zwsystem_ipc_setSpeaker(stSetSpeakerReq stReq, stSetSpeakerRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _SetNightMode);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stNightModeReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stNightModeReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _SetNightMode ||
-            u32PayloadSize != sizeof(stNightModeRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stNightModeRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetSpeakerReq, stSetSpeakerRep>(
+                _SetSpeak, stReq, pRep);
 }
 
-int cht_ipc_setAutoNightMode(const stNightModeReq *pReq, stNightModeRep *pRep)
+int zwsystem_ipc_setFlipUpDown(stSetFlipUpDownReq stReq, stSetFlipUpDownRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _SetAutoNightVision);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stNightModeReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stNightModeReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _SetAutoNightVision ||
-            u32PayloadSize != sizeof(stNightModeRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stNightModeRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetFlipUpDownReq, stSetFlipUpDownRep>(
+                _SetFlipUpDown, stReq, pRep);
 }
 
-int cht_ipc_setPtzHome(const stSetPtzHomeReq *pReq, stSetPtzHomeRep *pRep)
+int zwsystem_ipc_setLed(stSetLedReq stReq, stSetLedRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _SetPtzHome);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stSetPtzHomeReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stSetPtzHomeReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _SetPtzHome ||
-            u32PayloadSize != sizeof(stSetPtzHomeRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stSetPtzHomeRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetLedReq, stSetLedRep>(
+                _SetLED, stReq, pRep);
 }
 
-int cht_ipc_gotoPtzHome(const stPtzMoveReq *pReq, stPtzMoveRep *pRep)
+int zwsystem_ipc_setCameraPower(stSetCameraPowerReq stReq, stSetCameraPowerRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GotoPtzHome);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stPtzMoveReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stPtzMoveReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _GotoPtzHome ||
-            u32PayloadSize != sizeof(stPtzMoveRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stPtzMoveRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSetCameraPowerReq, stSetCameraPowerRep>(
+                _SetCameraPower, stReq, pRep);
 }
 
-int cht_ipc_getDateTimeInfo(const stDateTimeInfoReq *pReq, stDateTimeInfoRep *pRep)
+int zwsystem_ipc_quarySnapshot(stSnapshotReq stReq, stSnapshotRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GetTimeZone);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stDateTimeInfoReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stDateTimeInfoReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _GetTimeZone ||
-            u32PayloadSize != sizeof(stDateTimeInfoRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stDateTimeInfoRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stSnapshotReq, stSnapshotRep>(
+                _QuarySnapshot, stReq, pRep);
 }
 
-int cht_ipc_setDateTimeInfo(const stDateTimeInfoReq *pReq, stDateTimeInfoRep *pRep)
+int zwsystem_ipc_reboot(stRebootReq stReq, stRebootRep *pRep)
 {
-    if (!pReq) return -1;
-
-    int rc = 0;
-    stChtIpcMsg pIpcReqMsg;
-    uint8_t *recv = NULL;
-    bool res = false;
-    do {
-        cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _SetTimeZone);
-        pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stDateTimeInfoReq);
-
-        std::shared_ptr<nngipc::RequestHandler> rep_handler =
-                        nngipc::RequestHandler::create(CHT_IPC_NAME);
-        if (!rep_handler) { rc = -2; break; }
-
-        res = rep_handler->append((const uint8_t *)&pIpcReqMsg, sizeof(stChtIpcHdr));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->append((const uint8_t *)pReq, sizeof(stDateTimeInfoReq));
-        if (!res) { rc = -3; break; }
-        res = rep_handler->send();
-        if (!res) { rc = -4; break; }
-
-        size_t recv_size = 0;
-        res = rep_handler->recv(&recv, &recv_size);
-        // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
-            rc = -5; break;
-        }
-        stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;
-        if ( cht_ipc_msg_checkFourCC(pIpcRepHdr->u32FourCC) != 1 ||
-             pIpcRepHdr->u32HdrSize < 3) {
-            rc = -5; break;
-        }
-        int ipc_result = pIpcRepHdr->u16Headers[2];
-        uint16_t u16CmdType = pIpcRepHdr->u16Headers[1];
-        uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
-        if (ipc_result != 0 ||
-            u16CmdType != _SetTimeZone ||
-            u32PayloadSize != sizeof(stDateTimeInfoRep)) { rc = -6; break; }
-
-        if (pRep) {
-            stChtIpcMsg *pIpcRepMsg = (stChtIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, sizeof(stDateTimeInfoRep));
-        }
-    } while (false);
-
-    if (recv) {
-        free(recv);
-    }
-
-    cht_ipc_msg_free(&pIpcReqMsg);
-
-    return rc;
+    return ipc_client_executeReqRep<stRebootReq, stRebootRep>(
+                _Reboot, stReq, pRep);
 }
-#endif
 
+int zwsystem_ipc_setStorageDay(stSetStorageDayReq stReq, stSetStorageDayRep *pRep)
+{
+    return ipc_client_executeReqRep<stSetStorageDayReq, stSetStorageDayRep>(
+                _SetCamStorageDay, stReq, pRep);
+}
+
+int zwsystem_ipc_setEventStorageDay(stSetStorageDayReq stReq, stSetStorageDayRep *pRep)
+{
+    return ipc_client_executeReqRep<stSetStorageDayReq, stSetStorageDayRep>(
+                _SetCamEventStorageDay, stReq, pRep);
+}
+
+int zwsystem_ipc_formatSdCard(stFormatSdCardReq stReq, stFormatSdCardRep *pRep)
+{
+    return ipc_client_executeReqRep<stFormatSdCardReq, stFormatSdCardRep>(
+                _FormatSDCard, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzControlMove(stPtzControlMoveReq stReq, stPtzControlMoveRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzControlMoveReq, stPtzControlMoveRep>(
+                _PtzControlMove, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzAbsoluteMove(stPtzMoveReq stReq, stPtzMoveRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
+                _FormatSDCard, stReq, pRep);
+}
+int zwsystem_ipc_setPtzRelativeMove(stPtzMoveReq stReq, stPtzMoveRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
+                _FormatSDCard, stReq, pRep);
+}
+int zwsystem_ipc_setPtzContinuousMove(stPtzMoveReq stReq, stPtzMoveRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
+                _FormatSDCard, stReq, pRep);
+}
+int zwsystem_ipc_gotoPtzHome(stPtzMoveReq stReq, stPtzMoveRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
+                _FormatSDCard, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzSpeed(stSetPtzSpeedReq stReq, stSetPtzSpeedRep *pRep)
+{
+    return ipc_client_executeReqRep<stSetPtzSpeedReq, stSetPtzSpeedRep>(
+                _PtzControlSpeed, stReq, pRep);
+}
+
+int zwsystem_ipc_getPtzStatus(stGetPtzStatusReq stReq, stGetPtzStatusRep *pRep)
+{
+    return ipc_client_executeReqRep<stGetPtzStatusReq, stGetPtzStatusRep>(
+                _PtzGetControl, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzTourGo(stPtzTourGoReq stReq, stPtzTourGoRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzTourGoReq, stPtzTourGoRep>(
+                _PtzControlTourGo, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzGoPreset(stPtzGoPresetReq stReq, stPtzGoPresetRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzGoPresetReq, stPtzGoPresetRep>(
+                _PtzControlGoPst, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzPresetPoint(stPtzSetPresetReq stReq, stPtzSetPresetRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzSetPresetReq, stPtzSetPresetRep>(
+                _PtzSetPresetPoint, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzHumanTracking(stPtzSetTrackingReq stReq, stPtzSetTrackingRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzSetTrackingReq, stPtzSetTrackingRep>(
+                _HamiCamHumanTracking, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzPetTracking(stPtzSetTrackingReq stReq, stPtzSetTrackingRep *pRep)
+{
+    return ipc_client_executeReqRep<stPtzSetTrackingReq, stPtzSetTrackingRep>(
+                _HamiCamPetTracking, stReq, pRep);
+}
+
+int zwsystem_ipc_setPtzHome(stSetPtzHomeReq stReq, stSetPtzHomeRep *pRep)
+{
+    return ipc_client_executeReqRep<stSetPtzHomeReq, stSetPtzHomeRep>(
+                _FormatSDCard, stReq, pRep);
+}
+
+int zwsystem_ipc_getCameraBindWifiInfo(stGetCameraBindWifiInfoReq stReq, stGetCameraBindWifiInfoRep *pRep)
+{
+    return ipc_client_executeReqRep<stGetCameraBindWifiInfoReq, stGetCameraBindWifiInfoRep>(
+                _GetCameraBindWifiInfo, stReq, pRep);
+}
+
+int zwsystem_ipc_upgradeCameraOta(stUpgradeCameraOtaReq stReq, stUpgradeCameraOtaRep *pRep)
+{
+    return ipc_client_executeReqRep<stUpgradeCameraOtaReq, stUpgradeCameraOtaRep>(
+                _UpgradeCameraOTA, stReq, pRep);
+}
+
+int zwsystem_ipc_setCameraAiSetting(stCameraAiSettingReq stReq, stCameraAiSettingRep *pRep)
+{
+    return ipc_client_executeReqRep<stCameraAiSettingReq, stCameraAiSettingRep>(
+                _SetCameraAISetting, stReq, pRep);
+}
+
+int zwsystem_ipc_getCameraAiSetting(stCameraAiSettingReq stReq, stCameraAiSettingRep *pRep)
+{
+    return ipc_client_executeReqRep<stCameraAiSettingReq, stCameraAiSettingRep>(
+                _GetCameraAISetting, stReq, pRep);
+}
+
+// event subscriber
 class ZwsystemSubListener
 {
 public:
