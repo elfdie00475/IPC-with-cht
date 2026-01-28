@@ -23,6 +23,7 @@
 #include "camera_parameters_manager.h"
 #include "cht_p2p_camera_command_handler.h"
 #include "cht_p2p_camera_control_handler.h"
+#include "cht_p2p_camera_streaming_handler.h"
 
 // 內部輔助函數 - 格式化時間戳
 static std::string getFormattedTimestamp(void)
@@ -238,7 +239,8 @@ void ChtP2PCameraAPI::controlCallback(CHTP2P_ControlType type, void *handle,
 
 void ChtP2PCameraAPI::audioCallback(const char *data, size_t dataSize, const char *metadata, void *userParam)
 {
-
+    auto &streaminghandler = ChtP2PCameraStreamingHandler::getInstance();
+    streaminghandler.audioCallback(data, dataSize, metadata, userParam);
 }
 
 bool ChtP2PCameraAPI::isEventWorkerStopping(void)

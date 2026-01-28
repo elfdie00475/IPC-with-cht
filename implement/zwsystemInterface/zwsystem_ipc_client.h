@@ -70,10 +70,8 @@ extern int zwsystem_ipc_getCameraAiSetting(stCameraAiSettingReq stReq, stCameraA
 extern int zwsystem_ipc_feedbackRecordEvent(stRecordEventReq stReq, stRecordEventRep *pRep);
 extern int zwsystem_ipc_feedbackRecognitionEvent(stRecognitionEventReq stReq, stRecognitionEventRep *pRep);
 extern int zwsystem_ipc_feedbackCameraStatusEvent(stCameraStatusEventReq stReq, stCameraStatusEventRep *pRep);
-extern int zwsystem_ipc_startVideoLiveStream(stStartVideoStreamReq stReq, stStartVideoStreamRep *pRep);
-extern int zwsystem_ipc_startVideoHistoryStream(stStartVideoStreamReq stReq, stStartVideoStreamRep *pRep);
-extern int zwsystem_ipc_stopVideoLiveStream(stStopVideoLiveStreamReq stReq, stStopVideoLiveStreamRep *pRep);
-extern int zwsystem_ipc_stopVideoHistoryStream(stStopVideoLiveStreamReq stReq, stStopVideoLiveStreamRep *pRep);
+extern int zwsystem_ipc_startVideoStream(stStartVideoStreamReq stReq, stStartVideoStreamRep *pRep);
+extern int zwsystem_ipc_stopVideoStream(stStopVideoStreamReq stReq, stStopVideoStreamRep *pRep);
 extern int zwsystem_ipc_startAudioStream(stStartAudioStreamReq stReq, stStartAudioStreamRep *pRep);
 extern int zwsystem_ipc_stopAudioStream(stStopAudioStreamReq stReq, stStopAudioStreamRep *pRep);
 

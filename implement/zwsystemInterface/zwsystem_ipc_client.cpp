@@ -320,6 +320,30 @@ int zwsystem_ipc_getCameraAiSetting(stCameraAiSettingReq stReq, stCameraAiSettin
                 _GetCameraAISetting, stReq, pRep);
 }
 
+int zwsystem_ipc_startVideoStream(stStartVideoStreamReq stReq, stStartVideoStreamRep *pRep)
+{
+    return ipc_client_executeReqRep<stStartVideoStreamReq, stStartVideoStreamRep>(
+            _StartVideoStream, stReq, pRep);
+}
+
+int zwsystem_ipc_stopVideoStream(stStopVideoStreamReq stReq, stStopVideoStreamRep *pRep)
+{
+    return ipc_client_executeReqRep<stStopVideoStreamReq, stStopVideoStreamRep>(
+            _StopVideoStream, stReq, pRep);
+}
+
+int zwsystem_ipc_startAudioStream(stStartAudioStreamReq stReq, stStartAudioStreamRep *pRep)
+{
+    return ipc_client_executeReqRep<stStartAudioStreamReq, stStartAudioStreamRep>(
+            _StartAudioStream, stReq, pRep);
+}
+
+int zwsystem_ipc_stopAudioStream(stStopAudioStreamReq stReq, stStopAudioStreamRep *pRep)
+{
+    return ipc_client_executeReqRep<stStopAudioStreamReq, stStopAudioStreamRep>(
+            _StopAudioStream, stReq, pRep);
+}
+
 // event subscriber
 class ZwsystemSubListener
 {

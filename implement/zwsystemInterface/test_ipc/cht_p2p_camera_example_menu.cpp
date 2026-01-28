@@ -4,41 +4,34 @@
  * @date 2025/04/29
  */
 
-#include "cht_p2p_agent_c.h"
-#include <iostream>
-#include <thread>
-#include <chrono>
-#include <random>
-#include <csignal>
-#include <sstream>
-#include <iomanip>
-#include <map>
-#include <atomic>
-#include <mutex>
-#include <condition_variable>
-#include <fstream>
-#include <vector>
-#include <memory>
-#include <cstdlib>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <csignal>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <random>
 #include <regex>
+#include <sstream>
+#include <thread>
+#include <vector>
+
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
+#include "cht_p2p_agent_c.h"
+#include "camera_parameters_manager.h"
 #include "cht_p2p_camera_api.h"
 #include "cht_p2p_camera_control_handler.h"
-#include "camera_parameters_manager.h"
-//#include "camera_driver.h"
-//#include "stream_manager.h"
-//#include "ReportManager.h"
-//#include "cht_p2p_agent_payload_defined.h"
-#include <rapidjson/document.h>
-#include <rapidjson/writer.h>
-#include <rapidjson/stringbuffer.h>
+#include "cht_p2p_agent_payload_defined.h"
 #include "timezone_utils.h"
-
-// ===== RapidJSON 使用聲明 =====
-using rapidjson::Document;
-using rapidjson::kObjectType;
-using rapidjson::StringRef;
-using rapidjson::Value;
 
 // ===== 全域變數 =====
 std::atomic<bool> g_running(true);
@@ -50,9 +43,6 @@ std::mutex g_allThreadsCompletedMutex;
 
 // 訊號計數
 std::atomic<int> g_signalCount(0);
-
-// 定時回報管理器實例
-std::unique_ptr<ReportManager> g_reportManager;
 
 // 格式化並打印時間戳
 std::string getFormattedTimestamp()
@@ -94,25 +84,25 @@ void setTestServerIP() {
     std::cout << "\n===== 設定測試伺服器IP =====" << std::endl;
     std::cout << "目前測試伺服器IP: " << g_testServerIP << std::endl;
     std::cout << "請輸入新的IP地址 (Enter保持不變): ";
-    
+
     std::string newIP;
     std::getline(std::cin, newIP);
-    
+
     if (newIP.empty()) {
         std::cout << "IP地址未變更" << std::endl;
         return;
     }
-    
+
     // 驗證IP格式
     if (!isValidIPAddress(newIP)) {
         std::cout << "✗ IP地址格式錯誤: " << newIP << std::endl;
         std::cout << "  請使用正確格式 (例如: 192.168.1.100)" << std::endl;
         return;
     }
-    
+
     g_testServerIP = newIP;
     std::cout << "✓ 測試伺服器IP已更新為: " << g_testServerIP << std::endl;
-    
+
     // 儲存到參數管理器供後續使用
     auto &paramsManager = CameraParametersManager::getInstance();
     paramsManager.setParameter("testServerIP", g_testServerIP);
@@ -173,17 +163,6 @@ void addDebugLog(const std::string &message)
     // 可以選擇將調試日誌寫入文件
     // std::ofstream logFile("/tmp/cht_debug.log", std::ios::app);
     // logFile << "[" << getFormattedTimestamp() << "] " << message << std::endl;
-}
-
-// 退出處理函數
-void cleanupResources()
-{
-    std::cout << "執行資源清理..." << std::endl;
-    if (g_reportManager)
-    {
-        g_reportManager->stop();
-        g_reportManager.reset();
-    }
 }
 
 // 信號處理函數
@@ -350,9 +329,12 @@ std::string onControl(CHTP2P_ControlType controlType, const std::string &payload
 {
     std::cout << "收到控制命令: controlType=" << controlType << ", payload=" << payload << std::endl;
     std::cout.flush();
-#if 1
+
+    std::string handleResult = "";
+#ifdef SIMULATION_MODE
     // **直接使用現有的控制處理器（包含HiOSS檢查）**
-    std::string result = ChtP2PCameraControlHandler::getInstance().handleControl(controlType, payload);
+
+    int result = ChtP2PCameraControlHandler::getInstance().controlHandleWrapper(controlType, payload, handleResult);
 
     // **如果是解綁指令，需要呼叫 chtp2p_send_control_done 回傳結果**
     if (controlType == _DeleteCameraInfo)
@@ -362,12 +344,8 @@ std::string onControl(CHTP2P_ControlType controlType, const std::string &payload
         // int chtp2p_result = chtp2p_send_control_done(_DeleteCameraInfo, controlHandle, result.c_str());
         // std::cout << "chtp2p_send_control_done 結果: " << chtp2p_result << std::endl;
     }
-
-    return result;
-#else
-    // 使用控制處理器處理控制命令
-    return ChtP2PCameraControlHandler::getInstance().handleControl(controlType, payload);
 #endif
+    return handleResult;
 }
 
 void onAudioData(const char *data, size_t dataSize, const std::string &metadata)
@@ -385,11 +363,11 @@ bool testGetCamStatusById(ChtP2PCameraAPI &cameraApi)
 
     std::string payload = "{\"tenantId\": \"" + paramsManager.getTenantId() +
                           "\", \"netNo\": \"" + paramsManager.getNetNo() +
-                          "\", \"camSid\": " + (paramsManager.getCamSid().empty() ? "0" : paramsManager.getCamSid()) +
+                          "\", \"camSid\": " + std::to_string(paramsManager.getCamSid()) +
                           ", \"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"userId\": \"" + paramsManager.getParameter("userId", "") + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetCamStatusById, payload);
+    std::string response = onControl(_GetCamStatusById, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -409,7 +387,7 @@ bool testDeleteCameraInfo(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_DeleteCameraInfo, payload);
+    std::string response = onControl(_DeleteCameraInfo, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -430,9 +408,9 @@ bool testSetTimeZone(ChtP2PCameraAPI &cameraApi, const std::string &tId = "")
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\", \"tId\": \"" + timeZoneId + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetTimeZone, payload);
+    std::string response = onControl(_SetTimeZone, payload);
     std::cout << "處理結果: " << response << std::endl;
-    
+
     std::time_t now = std::time(nullptr);
     std::tm lt = *std::localtime(&now);
 
@@ -449,7 +427,7 @@ bool testGetTimeZone(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetTimeZone, payload);
+    std::string response = onControl(_GetTimeZone, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -467,7 +445,7 @@ bool testUpdateCameraName(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"name\": \"" + newName + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_UpdateCameraName, payload);
+    std::string response = onControl(_UpdateCameraName, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -478,7 +456,7 @@ bool testGetHamiCamBindList(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetHamiCamBindList, payload);
+    std::string response = onControl(_GetHamiCamBindList, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -501,7 +479,7 @@ bool testSetCameraOSD(ChtP2PCameraAPI &cameraApi)
                           "\"showCameraName\": true, \"position\": 0}";
 #endif
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetCameraOSD, payload);
+    std::string response = onControl(_SetCameraOSD, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -551,7 +529,7 @@ bool testSetCameraHD(ChtP2PCameraAPI &cameraApi)
     std::cout << "  - isHd: " << isHd << " (" << (isHd == "1" ? "開啟1080P" : "關閉720P") << ")" << std::endl;
     std::cout << "  - payload: " << payload << std::endl;
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetCameraHD, payload);
+    std::string response = onControl(_SetCameraHD, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 解析回應驗證結果 - 使用 rapidjson
@@ -610,7 +588,7 @@ bool testSetFlicker(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"flicker\": \"" + flicker + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetFlicker, payload);
+    std::string response = onControl(_SetFlicker, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -619,9 +597,6 @@ bool testSetImageQuality(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試設定影像品質 =====" << std::endl;
     // 顯示當前運行模式
-    bool isSimulationMode = CameraDriver::getInstance().isSimulationMode();
-    std::cout << "當前運行模式: " << (isSimulationMode ? "模擬模式" : "真實模式") << std::endl;
-
     std::cout << "請選擇影像品質 (0=低, 1=中, 2=高): ";
     std::string imageQuality;
     std::getline(std::cin, imageQuality);
@@ -671,13 +646,12 @@ bool testSetImageQuality(ChtP2PCameraAPI &cameraApi)
         qualityDesc = "高品質";
 
     std::cout << "測試參數:" << std::endl;
-    std::cout << "  - 運行模式: " << (isSimulationMode ? "模擬模式" : "真實模式") << std::endl;
     std::cout << "  - camId: " << paramsManager.getCameraId() << std::endl;
     std::cout << "  - requestId: " << requestId << std::endl;
     std::cout << "  - imageQuality: " << imageQuality << " (" << qualityDesc << ")" << std::endl;
     std::cout << "  - payload: " << payload << std::endl;
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetImageQuality, payload);
+    std::string response = onControl(_SetImageQuality, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 解析回應驗證結果 - 使用 rapidjson
@@ -744,7 +718,7 @@ bool testSetNightMode(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"nightMode\": \"" + nightMode + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetNightMode, payload);
+    std::string response = onControl(_SetNightMode, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -762,7 +736,7 @@ bool testSetAutoNightVision(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"autoNightVision\": \"" + autoNightVision + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetAutoNightVision, payload);
+    std::string response = onControl(_SetAutoNightVision, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -780,7 +754,7 @@ bool testSetFlipUpDown(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"isFlipUpDown\": \"" + flipUpDown + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetFlipUpDown, payload);
+    std::string response = onControl(_SetFlipUpDown, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -800,7 +774,7 @@ bool testSetMicrophone(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"microphoneSensitivity\": \"" + sensitivity + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetMicrophone, payload);
+    std::string response = onControl(_SetMicrophone, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -818,7 +792,7 @@ bool testSetSpeak(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"speakVolume\": \"" + volume + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetSpeak, payload);
+    std::string response = onControl(_SetSpeak, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -838,7 +812,7 @@ bool testSetLED(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"statusIndicatorLight\": \"" + led + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetLED, payload);
+    std::string response = onControl(_SetLED, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -856,35 +830,13 @@ bool testSetCameraPower(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"camera\": \"" + power + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetCameraPower, payload);
+    std::string response = onControl(_SetCameraPower, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
 bool testGetSnapshotHamiCamDevice(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試取得快照 =====" << std::endl;
-
-    // 顯示當前運行模式
-    bool isSimulationMode = CameraDriver::getInstance().isSimulationMode();
-    std::cout << "當前運行模式: " << (isSimulationMode ? "模擬模式" : "真實模式") << std::endl;
-printf("%s %d\n", __func__, __LINE__);
-    // 檢查SD卡狀態
-    if (!isSimulationMode)
-    {
-        if (access("/mnt/sd", F_OK) != 0)
-        {
-            std::cout << "警告：/mnt/sd 不存在，可能無法正常截圖" << std::endl;
-        }
-        else
-        {
-            std::cout << "SD卡基礎路徑存在" << std::endl;
-
-            // 顯示SD卡標籤資訊
-            auto &driver = CameraDriver::getInstance();
-            // 這裡可以調用 getSDCardLabelPath() 如果它是 public 的
-            std::cout << "將動態檢測SD卡標籤名稱..." << std::endl;
-        }
-    }
 
     auto &paramsManager = CameraParametersManager::getInstance();
     // 生成事件ID（基於當前時間）
@@ -911,12 +863,11 @@ printf("%s %d\n", __func__, __LINE__);
     std::string payload = requestBuffer.GetString();
 
     std::cout << "測試參數:" << std::endl;
-    std::cout << "  - 運行模式: " << (isSimulationMode ? "模擬模式" : "真實模式") << std::endl;
     std::cout << "  - eventId: " << eventId << std::endl;
     std::cout << "  - camId: " << paramsManager.getCameraId() << std::endl;
     std::cout << "  - payload: " << payload << std::endl;
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetSnapshotHamiCamDevice, payload);
+    std::string response = onControl(_GetSnapshotHamiCamDevice, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 解析回應驗證結果 - 使用 rapidjson
@@ -944,15 +895,6 @@ printf("%s %d\n", __func__, __LINE__);
                 dateStream << std::put_time(now_tm, "%Y-%m-%d");
                 std::string dateStr = dateStream.str();
 
-                if (isSimulationMode)
-                {
-                    std::cout << "  - 預期檔案路徑: /mnt/sd/SIM-LABEL/" << dateStr << "/" << eventId << "-" << paramsManager.getCameraId() << ".jpg" << std::endl;
-                }
-                else
-                {
-                    std::cout << "  - 預期檔案路徑: /mnt/sd/<動態標籤>/" << dateStr << "/" << eventId << "-" << paramsManager.getCameraId() << ".jpg" << std::endl;
-                }
-
                 return true;
             }
             else
@@ -974,6 +916,8 @@ printf("%s %d\n", __func__, __LINE__);
         std::cout << "✗ 解析回應時發生異常: " << e.what() << std::endl;
         return false;
     }
+
+    return true;
 }
 
 bool testRestartHamiCamDevice(ChtP2PCameraAPI &cameraApi)
@@ -991,7 +935,7 @@ bool testRestartHamiCamDevice(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_RestartHamiCamDevice, payload);
+    std::string response = onControl(_RestartHamiCamDevice, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1011,7 +955,7 @@ bool testHamiCamFormatSDCard(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamFormatSDCard, payload);
+    std::string response = onControl(_HamiCamFormatSDCard, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1036,7 +980,7 @@ bool testUpgradeHamiCamOTA(ChtP2PCameraAPI &cameraApi)
                           "\", \"upgradeMode\": \"" + upgradeMode +
                           "\", \"filePath\": \"" + filePath + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_UpgradeHamiCamOTA, payload);
+    std::string response = onControl(_UpgradeHamiCamOTA, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1056,7 +1000,7 @@ bool testSetCamStorageDay(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"storageDay\": \"" + storageDay + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetCamStorageDay, payload);
+    std::string response = onControl(_SetCamStorageDay, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1074,7 +1018,7 @@ bool testSetCamEventStorageDay(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"eventStorageDay\": \"" + eventStorageDay + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetCamEventStorageDay, payload);
+    std::string response = onControl(_SetCamEventStorageDay, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1094,7 +1038,7 @@ bool testHamiCamPtzControlMove(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"cmd\": \"" + cmd + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlMove, payload);
+    std::string response = onControl(_HamiCamPtzControlMove, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1112,7 +1056,7 @@ bool testHamiCamPtzControlConfigSpeed(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"speed\": " + speed + "}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlConfigSpeed, payload);
+    std::string response = onControl(_HamiCamPtzControlConfigSpeed, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1123,7 +1067,7 @@ bool testHamiCamGetPtzControl(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamGetPtzControl, payload);
+    std::string response = onControl(_HamiCamGetPtzControl, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1141,7 +1085,7 @@ bool testHamiCamPtzControlTourGo(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"indexSequence\": \"" + indexSequence + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlTourGo, payload);
+    std::string response = onControl(_HamiCamPtzControlTourGo, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1159,7 +1103,7 @@ bool testHamiCamPtzControlGoPst(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"index\": " + pstIndex + "}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlGoPst, payload);
+    std::string response = onControl(_HamiCamPtzControlGoPst, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1191,7 +1135,7 @@ bool testHamiCamPtzControlConfigPst(ChtP2PCameraAPI &cameraApi)
                           ", \"remove\": \"" + remove +
                           "\", \"positionName\": \"" + pstName + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlConfigPst, payload);
+    std::string response = onControl(_HamiCamPtzControlConfigPst, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1209,7 +1153,7 @@ bool testHamiCamHumanTracking(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"val\": " + tracking + "}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamHumanTracking, payload);
+    std::string response = onControl(_HamiCamHumanTracking, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1227,7 +1171,7 @@ bool testHamiCamPetTracking(ChtP2PCameraAPI &cameraApi)
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                           "\", \"val\": " + tracking + "}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPetTracking, payload);
+    std::string response = onControl(_HamiCamPetTracking, payload);
     std::cout << "處理結果: " << response << std::endl;
     return true;
 }
@@ -1270,13 +1214,13 @@ static std::string generateIdFeatures(void)
         "Birl*", "T*o", "Is***", "N**a", "Sadd**",
         "柯○", "小○", "小○妮", "柯○", "秋○"
     };
-    
+
     srand(time(NULL));
 
     rapidjson::Document doc;
     doc.SetArray();
     rapidjson::Document::AllocatorType &alloc = doc.GetAllocator();
-    
+
     for (int i = 0; i < 20; i++)
     {
         int id = rand()%10000;
@@ -1288,8 +1232,8 @@ static std::string generateIdFeatures(void)
             std::time_t tt = static_cast<std::time_t>(timestamp);
             std::tm tm{};
             localtime_r(&tt, &tm);
-            
-            char buf[32];
+
+            char buf[128];
             snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
                             tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
                             tm.tm_hour, tm.tm_min, tm.tm_sec);
@@ -1301,24 +1245,24 @@ static std::string generateIdFeatures(void)
         }
         std::vector<uint8_t> bytes(feats.size()*sizeof(float));
         memcpy(bytes.data(), feats.data(), bytes.size());
-        
+
         std::string cts = epoch2Datetime(createTime);
         std::string uts = epoch2Datetime(updateTime);
         std::string b64 = base64_encode(bytes);
-        
+
         rapidjson::Value obj(rapidjson::kObjectType);
         obj.AddMember("id", id, alloc);
         obj.AddMember("name", rapidjson::Value(name.c_str(), alloc), alloc);
         obj.AddMember("verifyLevel", verifyLevel, alloc);
-        
-        
+
+
         obj.AddMember("createTime", rapidjson::Value().SetString(cts.c_str(), cts.size(), alloc), alloc);
         obj.AddMember("updateTime", rapidjson::Value().SetString(uts.c_str(), uts.size(), alloc), alloc);
         obj.AddMember("faceFeatures", rapidjson::Value().SetString(b64.c_str(), b64.size(), alloc), alloc);
 
         doc.PushBack(obj, alloc);
     }
-    
+
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     doc.Accept(writer);
@@ -1358,11 +1302,11 @@ bool testUpdateCameraAISetting(ChtP2PCameraAPI &cameraApi)
     // 先獲取當前的AI設定
     std::cout << "\n1. 獲取當前AI設定..." << std::endl;
     std::string getPayload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
-    std::string currentSettings = controlHandler.handleControl(_GetCameraAISetting, getPayload);
+    std::string currentSettings = onControl(_GetCameraAISetting, getPayload);
     std::cout << "當前設定: " << currentSettings << std::endl;
 
     // 解析回應以顯示當前值
-    Document currentDoc;
+    rapidjson::Document currentDoc;
     std::map<std::string, std::string> currentValues;
     currentDoc.Parse(currentSettings.c_str());
     if (!currentDoc.HasParseError() &&
@@ -1370,10 +1314,10 @@ bool testUpdateCameraAISetting(ChtP2PCameraAPI &cameraApi)
         currentDoc.HasMember("hamiAiSettings") && currentDoc["hamiAiSettings"].IsObject())
     {
 
-        const Value &aiSettings = currentDoc["hamiAiSettings"];
+        const rapidjson::Value &aiSettings = currentDoc["hamiAiSettings"];
 
         // 讀取所有當前值
-        for (Value::ConstMemberIterator itr = aiSettings.MemberBegin(); itr != aiSettings.MemberEnd(); ++itr)
+        for (rapidjson::Value::ConstMemberIterator itr = aiSettings.MemberBegin(); itr != aiSettings.MemberEnd(); ++itr)
         {
             std::string key = itr->name.GetString();
             if (itr->value.IsString())
@@ -1442,7 +1386,7 @@ bool testUpdateCameraAISetting(ChtP2PCameraAPI &cameraApi)
         {"電子圍籬座標3", "fencePos3", "coord", "電子圍籬座標3 (x,y)", "x,y (0-100)", "電子圍籬"},
         {"電子圍籬座標4", "fencePos4", "coord", "電子圍籬座標4 (x,y)", "x,y (0-100)", "電子圍籬"},
         {"圍籬進入方向", "fenceDir", "string", "電子圍籬進入方向", "0(進入)/1(離開)", "電子圍籬"},
-        
+
         // 人臉特徵值欄位表
         {"人臉特徵值欄位表", "identificationFeatures", "face", "人臉特徵值", "隨機產生(滿20位)", "人臉特徵值"}
     };
@@ -1685,8 +1629,11 @@ bool testUpdateCameraAISetting(ChtP2PCameraAPI &cameraApi)
     bool first = true;
 
     // 處理一般參數
-    for (const auto &[key, value] : newValues)
+    for (const auto& newValue : newValues)
     {
+        const std::string& key = newValue.first;
+        const std::string& value = newValue.second;
+
         if (!first)
             hamiAiSettings += ", ";
 
@@ -1711,15 +1658,17 @@ bool testUpdateCameraAISetting(ChtP2PCameraAPI &cameraApi)
             {
                 hamiAiSettings += "\"" + key + "\": " + value;
             }
-            
+
             std::cout << "  • " << paramIt->name << " = " << value << std::endl;
         }
         first = false;
     }
 
     // 處理座標參數
-    for (const auto &[key, coords] : newCoordValues)
+    for (const auto& coordValue : newCoordValues)
     {
+        const std::string& key = coordValue.first;
+        const std::pair<int, int>& coords = coordValue.second;
         if (!first)
             hamiAiSettings += ", ";
 
@@ -1757,13 +1706,13 @@ bool testUpdateCameraAISetting(ChtP2PCameraAPI &cameraApi)
                                 "\", \"hamiAiSettings\": " + hamiAiSettings + "}";
     std::cout << "發送請求: " << updatePayload << std::endl;
 
-    std::string response = controlHandler.handleControl(_UpdateCameraAISetting, updatePayload);
+    std::string response = onControl(_UpdateCameraAISetting, updatePayload);
     std::cout << "\n更新結果: " << response << std::endl;
 
     // 再次獲取設定以確認更新
     std::cout << "\n6. 確認更新後的設定..." << std::endl;
     std::string confirmGetPayload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
-    std::string confirmSettings = controlHandler.handleControl(_GetCameraAISetting, confirmGetPayload);
+    std::string confirmSettings = onControl(_GetCameraAISetting, confirmGetPayload);
     std::cout << "更新後設定: " << confirmSettings << std::endl;
 
     return true;
@@ -1784,7 +1733,7 @@ bool testGetCameraAISetting(ChtP2PCameraAPI &cameraApi)
     std::cout << "控制類型: _GetCameraAISetting" << std::endl;
     std::cout << "請求內容: " << payload << std::endl;
 
-    std::string response = controlHandler.handleControl(_GetCameraAISetting, payload);
+    std::string response = onControl(_GetCameraAISetting, payload);
 
     std::cout << "\n收到回應：" << std::endl;
     std::cout << "原始回應: " << response << std::endl;
@@ -1793,11 +1742,11 @@ bool testGetCameraAISetting(ChtP2PCameraAPI &cameraApi)
         // 解析並格式化顯示回應
         rapidjson::Document responseDoc;
         responseDoc.Parse(response.c_str());
-        
+
         if (responseDoc.HasParseError()) throw std::runtime_error("JSON解析失敗");
 
         std::cout << "\n===== AI設定詳細資訊 =====" << std::endl;
-        
+
         std::string key = "result";
         auto it = responseDoc.FindMember(key.c_str());
         if (it == responseDoc.MemberEnd()) throw std::runtime_error(std::string("缺少欄位: ") + key);
@@ -1960,7 +1909,7 @@ bool testGetCameraAISetting(ChtP2PCameraAPI &cameraApi)
             } else {
                 dir = it->value.GetString();
             }
-            
+
             std::string dirText = (dir == "0") ? "進入 (0)" : "離開 (1)";
             std::cout << "│ " << std::setw(11) << std::left << "圍籬方向" << " │ "
                       << std::setw(10) << std::left << dirText << " │ "
@@ -1981,8 +1930,8 @@ bool testGetCameraAISetting(ChtP2PCameraAPI &cameraApi)
                     std::cout << "┌────────────────┬──────────┬────────┬─────────────────┬─────────────────┐" << std::endl;
                     std::cout << "│ 人員ID         │ 姓名     │ 門檻值 │ 創建時間        │ 更新時間        │" << std::endl;
                     std::cout << "├────────────────┼──────────┼────────┼─────────────────┼─────────────────┤" << std::endl;
-                    
-                    
+
+
                     for (rapidjson::Value::ConstValueIterator itr = features.Begin(); itr != features.End(); ++itr)
                     {
                         std::string id = "N/A";
@@ -2001,14 +1950,14 @@ bool testGetCameraAISetting(ChtP2PCameraAPI &cameraApi)
                             const rapidjson::Value *vvl = findItem("verifyLevel");
                             const rapidjson::Value *vct = findItem("createTime");
                             const rapidjson::Value *vut = findItem("updateTime");
-                            
+
                             id = (vid && vid->IsString()) ? vid->GetString() : "N/A";
                             name = (vname && vname->IsString()) ? vname->GetString() : "N/A";
                             level = (vvl && vvl->IsInt()) ? std::to_string(vvl->GetInt()) : "N/A";
                             createTime = (vct && vct->IsString()) ? vct->GetString() : "N/A";
                             updateTime = (vut && vut->IsString()) ? vut->GetString() : "N/A";
                         }
-                        
+
                         std::cout << "│ " << std::setw(14) << std::left << id << " │ "
                                   << std::setw(8) << std::left << name << " │ "
                                   << std::setw(6) << std::left << level << " │ "
@@ -2097,7 +2046,7 @@ bool testGetVideoLiveStream(ChtP2PCameraAPI &cameraApi)
         std::cerr << "Failed to open output.json for writing.\n";
     }
 #endif
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetVideoLiveStream, payload);
+    std::string response = onControl(_GetVideoLiveStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 保存requestId供後續停止使用
@@ -2128,7 +2077,7 @@ bool testStopVideoLiveStream(ChtP2PCameraAPI &cameraApi)
     std::cout << "  - camId: " << paramsManager.getCameraId() << std::endl;
     std::cout << "  - requestId: " << requestId << std::endl;
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_StopVideoLiveStream, payload);
+    std::string response = onControl(_StopVideoLiveStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 清除保存的requestId
@@ -2219,7 +2168,7 @@ bool testGetVideoHistoryStream(ChtP2PCameraAPI &cameraApi)
         std::cerr << "Failed to open rtp_history.json for writing.\n";
     }
 #endif
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetVideoHistoryStream, payload);
+    std::string response = onControl(_GetVideoHistoryStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 保存requestId供後續停止使用
@@ -2250,7 +2199,7 @@ bool testStopVideoHistoryStream(ChtP2PCameraAPI &cameraApi)
     std::cout << "  - camId: " << paramsManager.getCameraId() << std::endl;
     std::cout << "  - requestId: " << requestId << std::endl;
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_StopVideoHistoryStream, payload);
+    std::string response = onControl(_StopVideoHistoryStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 清除保存的requestId
@@ -2321,7 +2270,7 @@ bool testGetVideoScheduleStream(ChtP2PCameraAPI &cameraApi)
         std::cerr << "Failed to open rtp_schedule.json for writing.\n";
     }
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetVideoScheduleStream, payload);
+    std::string response = onControl(_GetVideoScheduleStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 保存requestId供後續停止使用
@@ -2352,7 +2301,7 @@ bool testStopVideoScheduleStream(ChtP2PCameraAPI &cameraApi)
     std::cout << "  - camId: " << paramsManager.getCameraId() << std::endl;
     std::cout << "  - requestId: " << requestId << std::endl;
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_StopVideoScheduleStream, payload);
+    std::string response = onControl(_StopVideoScheduleStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 清除保存的requestId
@@ -2388,7 +2337,7 @@ bool testSendAudioStream(ChtP2PCameraAPI &cameraApi)
                           ", \"bitRate\": " + bitRate +
                           ", \"sampleRate\": " + sampleRate + "}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SendAudioStream, payload);
+    std::string response = onControl(_SendAudioStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 保存requestId供後續停止使用
@@ -2410,7 +2359,7 @@ bool testStopAudioStream(ChtP2PCameraAPI &cameraApi)
 
     std::string payload = "{\"requestId\": \"" + requestId + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_StopAudioStream, payload);
+    std::string response = onControl(_StopAudioStream, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 清除保存的requestId
@@ -2424,125 +2373,21 @@ bool testStreamManagerLiveVideo(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試串流管理器即時影音 =====" << std::endl;
 
-    auto &streamManager = StreamManager::getInstance();
-
-    std::string requestId = "sm_live_" + std::to_string(time(nullptr));
-
-    // 設置影音參數
-    VideoCodecParams videoParams;
-    videoParams.codec = 2;    // H.264
-    videoParams.width = 1920; // 1080p
-    videoParams.height = 1080;
-    videoParams.fps = 30;
-
-    AudioCodecParams audioParams;
-    audioParams.codec = 13; // 11:G711, 12:G729, 13:AAC
-    audioParams.bitRate = 64;
-    audioParams.sampleRate = 8;
-
-    std::cout << "啟動即時串流 - RequestID: " << requestId << std::endl;
-    std::cout << "使用測試伺服器IP: " << getTestServerIP() << std::endl;
-    bool result = streamManager.startLiveVideoStream(requestId, videoParams, audioParams, getTestServerIP());
-
-    if (result)
-    {
-        std::cout << "✓ 即時串流啟動成功" << std::endl;
-        std::cout << "串流將運行10秒後自動停止..." << std::endl;
-
-        // 等待10秒
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-
-        bool stopResult = streamManager.stopLiveVideoStream(requestId);
-        std::cout << (stopResult ? "✓ 即時串流已停止" : "✗ 停止即時串流失敗") << std::endl;
-    }
-    else
-    {
-        std::cout << "✗ 即時串流啟動失敗" << std::endl;
-    }
-
-    return result;
+    return false;
 }
 
 bool testStreamManagerHistoryVideo(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試串流管理器歷史影音 =====" << std::endl;
 
-    auto &streamManager = StreamManager::getInstance();
-
-    std::string requestId = "sm_history_" + std::to_string(time(nullptr));
-    long startTime = time(nullptr) - 3600; // 1小時前
-
-    // 設置影音參數
-    VideoCodecParams videoParams;
-    videoParams.codec = 2;    // H.264
-    videoParams.width = 1280; // 720p
-    videoParams.height = 720;
-    videoParams.fps = 10;
-
-    AudioCodecParams audioParams;
-    audioParams.codec = 11; // G.711
-    audioParams.bitRate = 64;
-    audioParams.sampleRate = 8;
-
-    std::cout << "啟動歷史串流 - RequestID: " << requestId
-              << ", 開始時間: " << startTime << std::endl;
-    std::cout << "使用測試伺服器IP: " << getTestServerIP() << std::endl;
-
-    bool result = streamManager.startHistoryVideoStream(requestId, startTime, videoParams, audioParams, getTestServerIP());
-
-    if (result)
-    {
-        std::cout << "✓ 歷史串流啟動成功" << std::endl;
-        std::cout << "串流將運行15秒後自動停止..." << std::endl;
-
-        // 等待15秒
-        std::this_thread::sleep_for(std::chrono::seconds(15));
-
-        bool stopResult = streamManager.stopHistoryVideoStream(requestId);
-        std::cout << (stopResult ? "✓ 歷史串流已停止" : "✗ 停止歷史串流失敗") << std::endl;
-    }
-    else
-    {
-        std::cout << "✗ 歷史串流啟動失敗" << std::endl;
-    }
-
-    return result;
+    return false;
 }
 
 bool testStreamManagerAudio(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試串流管理器音頻串流 =====" << std::endl;
 
-    auto &streamManager = StreamManager::getInstance();
-
-    std::string requestId = "sm_audio_" + std::to_string(time(nullptr));
-
-    // 設置音頻參數
-    AudioCodecParams audioParams;
-    audioParams.codec = 11; // G.711
-    audioParams.bitRate = 64;
-    audioParams.sampleRate = 8;
-
-    std::cout << "啟動音頻串流 - RequestID: " << requestId << std::endl;
-    bool result = streamManager.startAudioStream(requestId, audioParams);
-
-    if (result)
-    {
-        std::cout << "✓ 音頻串流啟動成功" << std::endl;
-        std::cout << "串流將運行8秒後自動停止..." << std::endl;
-
-        // 等待8秒
-        std::this_thread::sleep_for(std::chrono::seconds(8));
-
-        bool stopResult = streamManager.stopAudioStream(requestId);
-        std::cout << (stopResult ? "✓ 音頻串流已停止" : "✗ 停止音頻串流失敗") << std::endl;
-    }
-    else
-    {
-        std::cout << "✗ 音頻串流啟動失敗" << std::endl;
-    }
-
-    return result;
+    return false;
 }
 
 // ===== 新增：回報機制測試函數 =====
@@ -2551,195 +2396,35 @@ bool testReportSnapshot(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試截圖事件回報 =====" << std::endl;
 
-    std::string eventId = "test_snap_" + std::to_string(time(nullptr));
-    std::string snapshotTime = getFormattedTimestamp();
-    std::string filePath = "/tmp/test_snapshot.jpg";
-
-    std::cout << "回報截圖事件 - EventID: " << eventId << std::endl;
-    std::cout << "截圖時間: " << snapshotTime << std::endl;
-    std::cout << "檔案路徑: " << filePath << std::endl;
-
-    bool result = cameraApi.reportSnapshot(eventId, snapshotTime, filePath);
-    std::cout << (result ? "✓ 截圖事件回報成功" : "✗ 截圖事件回報失敗") << std::endl;
-
-    return result;
+    return false;
 }
 
 bool testReportRecord(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試錄影事件回報 =====" << std::endl;
 
-    std::string eventId = "test_rec_" + std::to_string(time(nullptr));
-
-    // 模擬錄影時間範圍
-    auto now = std::chrono::system_clock::now();
-    auto fromTime = now - std::chrono::seconds(60);
-    auto toTime = now;
-
-    auto fromTime_t = std::chrono::system_clock::to_time_t(fromTime);
-    auto toTime_t = std::chrono::system_clock::to_time_t(toTime);
-
-    std::stringstream fromSS, toSS;
-    fromSS << std::put_time(std::localtime(&fromTime_t), "%Y-%m-%d %H:%M:%S") << ".000";
-    toSS << std::put_time(std::localtime(&toTime_t), "%Y-%m-%d %H:%M:%S") << ".000";
-
-    std::string filePath = "/tmp/test_record.mp4";
-    std::string thumbnailfilePath = "/tmp/test_record.jpg";
-
-    std::cout << "回報錄影事件 - EventID: " << eventId << std::endl;
-    std::cout << "錄影時間: " << fromSS.str() << " 到 " << toSS.str() << std::endl;
-    std::cout << "檔案路徑: " << filePath << std::endl;
-
-    bool result = cameraApi.reportRecord(eventId, fromSS.str(), toSS.str(), filePath, thumbnailfilePath);
-    std::cout << (result ? "✓ 錄影事件回報成功" : "✗ 錄影事件回報失敗") << std::endl;
-
-    return result;
+    return false;
 }
 
 bool testReportRecognition(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試辨識事件回報 =====" << std::endl;
 
-    std::string eventId = "test_ai_" + std::to_string(time(nullptr));
-    std::string eventTime = getFormattedTimestamp();
-
-    std::cout << "請選擇事件類型 (1=EED, 2=FR, 3=FED, 4=BD): ";
-    std::string choice;
-    std::getline(std::cin, choice);
-
-    std::string eventType = "EED";
-    std::string eventClass = "person";
-
-    if (choice == "2")
-    {
-        eventType = "FR";
-        eventClass = "face";
-    }
-    else if (choice == "3")
-    {
-        eventType = "FED";
-        eventClass = "person";
-    }
-    else if (choice == "4")
-    {
-        eventType = "BD";
-        eventClass = "motion";
-    }
-
-    std::string videoFilePath = "/tmp/test_recognition.mp4";
-    std::string snapshotFilePath = "/tmp/test_recognition.jpg";
-    std::string audioFilePath = "/tmp/test_recognition.aac";
-    std::string coordinate = "121.5654,25.0330"; // 台北座標
-    std::string resultAttribute = "{\"confidence\":0.95,\"objectCount\":1}";
-
-    std::cout << "回報辨識事件 - EventID: " << eventId << std::endl;
-    std::cout << "事件類型: " << eventType << ", 事件類別: " << eventClass << std::endl;
-    std::cout << "事件時間: " << eventTime << std::endl;
-
-    bool result = cameraApi.reportRecognition(
-        eventId, eventTime, eventType, eventClass,
-        videoFilePath, snapshotFilePath, audioFilePath,
-        coordinate, resultAttribute);
-
-    std::cout << (result ? "✓ 辨識事件回報成功" : "✗ 辨識事件回報失敗") << std::endl;
-
-    return result;
+    return false;
 }
 
 bool testReportStatus(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試狀態事件回報 =====" << std::endl;
 
-    std::string eventId = "test_status_" + std::to_string(time(nullptr));
-
-    std::cout << "請選擇狀態類型 (1=正常, 2=異常): ";
-    std::string choice;
-    std::getline(std::cin, choice);
-
-    int type = (choice == "2") ? 4 : 2; // 2=正常, 4=異常
-    std::string status = (choice == "2") ? "Abnormal" : "Normal";
-
-    auto &paramsManager = CameraParametersManager::getInstance();
-    std::string camId = paramsManager.getCameraId();
-
-    std::cout << "回報狀態事件 - EventID: " << eventId << std::endl;
-    std::cout << "攝影機ID: " << camId << ", 狀態: " << status << std::endl;
-
-    bool result = cameraApi.reportStatusEvent(eventId, type, camId, status, true);
-    std::cout << (result ? "✓ 狀態事件回報成功" : "✗ 狀態事件回報失敗") << std::endl;
-
-    return result;
+    return false;
 }
 
 bool testReportManagerControl(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 測試回報管理器控制 =====" << std::endl;
 
-    if (!g_reportManager)
-    {
-        g_reportManager = std::make_unique<ReportManager>(&cameraApi);
-        std::cout << "回報管理器已初始化" << std::endl;
-    }
-
-    std::cout << "請選擇操作:" << std::endl;
-    std::cout << "1 - 啟動回報機制" << std::endl;
-    std::cout << "2 - 停止回報機制" << std::endl;
-    std::cout << "3 - 顯示回報狀態" << std::endl;
-    std::cout << "4 - 設定回報間隔" << std::endl;
-    std::cout << "請輸入選擇: ";
-
-    std::string choice;
-    std::getline(std::cin, choice);
-
-    if (choice == "1")
-    {
-        g_reportManager->start();
-        std::cout << "回報機制已啟動" << std::endl;
-    }
-    else if (choice == "2")
-    {
-        g_reportManager->stop();
-        std::cout << "回報機制已停止" << std::endl;
-    }
-    else if (choice == "3")
-    {
-        g_reportManager->printStatus();
-    }
-    else if (choice == "4")
-    {
-        std::cout << "請選擇回報類型 (snapshot/record/recognition/status): ";
-        std::string type;
-        std::getline(std::cin, type);
-
-        std::cout << "請輸入間隔秒數 (5-300): ";
-        std::string intervalStr;
-        std::getline(std::cin, intervalStr);
-
-        try
-        {
-            int interval = std::stoi(intervalStr);
-            if (interval >= 5 && interval <= 300)
-            {
-                g_reportManager->setInterval(type, interval);
-                std::cout << "間隔設定成功: " << type << " = " << interval << " 秒" << std::endl;
-            }
-            else
-            {
-                std::cout << "間隔必須在5-300秒之間" << std::endl;
-            }
-        }
-        catch (...)
-        {
-            std::cout << "無效的間隔數值" << std::endl;
-        }
-    }
-    else
-    {
-        std::cout << "無效的選擇" << std::endl;
-        return false;
-    }
-
-    return true;
+    return false;
 }
 /**
  * 加入到 cht_p2p_camera_example_menu.cpp 的測試選單函數
@@ -2960,7 +2645,7 @@ void displayCurrentStatus()
 
     std::cout << "\n網路資訊:" << std::endl;
     std::cout << "  - WiFi SSID: " << paramsManager.getWifiSsid() << std::endl;
-    std::cout << "  - WiFi Signal: " << paramsManager.getWifiSignalStrength() << " dBm" << std::endl;
+    //std::cout << "  - WiFi Signal: " << paramsManager.getWifiSignalStrength() << " dBm" << std::endl;
     std::cout << "  - IP Address: " << paramsManager.getParameter("ipAddress", "Unknown") << std::endl;
     std::cout << "  - MAC Address: " << paramsManager.getParameter("macAddress", "Unknown") << std::endl;
 
@@ -3067,7 +2752,7 @@ void runPTZBatchTest(ChtP2PCameraAPI &cameraApi)
         auto &paramsManager = CameraParametersManager::getInstance();
         std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                               "\", \"cmd\": \"" + cmd + "\"}";
-        std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlMove, payload);
+        std::string response = onControl(_HamiCamPtzControlMove, payload);
         std::cout << "結果: " << response << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
@@ -3079,7 +2764,7 @@ void runPTZBatchTest(ChtP2PCameraAPI &cameraApi)
         auto &paramsManager = CameraParametersManager::getInstance();
         std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() +
                               "\", \"speed\": " + std::to_string(speed) + "}";
-        std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_HamiCamPtzControlConfigSpeed, payload);
+        std::string response = onControl(_HamiCamPtzControlConfigSpeed, payload);
         std::cout << "結果: " << response << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
@@ -3110,29 +2795,7 @@ void runReportBatchTest(ChtP2PCameraAPI &cameraApi)
 {
     std::cout << "\n===== 回報機制批次測試 =====" << std::endl;
 
-    // 測試各種回報
-    std::cout << "\n[1/4] 測試截圖事件回報..." << std::endl;
-    testReportSnapshot(cameraApi);
-
-    std::cout << "\n[2/4] 測試錄影事件回報..." << std::endl;
-    testReportRecord(cameraApi);
-
-    std::cout << "\n[3/4] 測試辨識事件回報..." << std::endl;
-    // 自動選擇EED事件
-    std::cout << "自動測試EED事件..." << std::endl;
-    std::string eventId = "batch_ai_" + std::to_string(time(nullptr));
-    std::string eventTime = getFormattedTimestamp();
-    bool result = cameraApi.reportRecognition(
-        eventId, eventTime, "EED", "person",
-        "/tmp/batch_recognition.mp4", "/tmp/batch_recognition.jpg",
-        "/tmp/batch_recognition.aac", "121.5654,25.0330",
-        "{\"confidence\":0.88,\"objectCount\":1}");
-    std::cout << (result ? "✓ 辨識事件回報成功" : "✗ 辨識事件回報失敗") << std::endl;
-
-    std::cout << "\n[4/4] 測試狀態事件回報..." << std::endl;
-    testReportStatus(cameraApi);
-
-    std::cout << "\n===== 回報機制批次測試完成 =====" << std::endl;
+    return ;
 }
 
 bool testSetTimeZoneSimplified(ChtP2PCameraAPI &cameraApi, const std::string &tId = "")
@@ -3159,7 +2822,7 @@ bool testSetTimeZoneSimplified(ChtP2PCameraAPI &cameraApi, const std::string &tI
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\", \"tId\": \"" + timeZoneId + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_SetTimeZone, payload);
+    std::string response = onControl(_SetTimeZone, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     return true;
@@ -3199,13 +2862,6 @@ bool performNtpSync()
 {
     std::cout << "執行NTP時間同步..." << std::endl;
 
-    auto &driver = CameraDriver::getInstance();
-    if (driver.isSimulationMode())
-    {
-        std::cout << "模擬模式：模擬NTP同步完成" << std::endl;
-        return true;
-    }
-
     // 嘗試使用台灣的NTP服務器
     std::vector<std::string> ntpServers = {
         "tock.stdtime.gov.tw",
@@ -3240,7 +2896,7 @@ bool testGetTimeZoneSimplified(ChtP2PCameraAPI &cameraApi)
     auto &paramsManager = CameraParametersManager::getInstance();
     std::string payload = "{\"camId\": \"" + paramsManager.getCameraId() + "\"}";
 
-    std::string response = ChtP2PCameraControlHandler::getInstance().handleControl(_GetTimeZone, payload);
+    std::string response = onControl(_GetTimeZone, payload);
     std::cout << "處理結果: " << response << std::endl;
 
     // 解析回應顯示詳細資訊
@@ -5004,8 +4660,6 @@ int main(int argc, char *argv[])
 {
     // ===== 程序初始化 =====
     // 註冊退出處理函數
-    atexit(cleanupResources);
-
     printDebug("增強版互動測試程式開始執行");
 
     std::cout << "開始初始化媒體組態管理器..." << std::endl;
@@ -5076,22 +4730,10 @@ int main(int argc, char *argv[])
     /********************************************************** */
     // 檢查是否啟用模擬模式
     /********************************************************** */
-    bool simulationMode = false;
-    for (int i = 1; i < argc; i++)
-    {
-        if (std::string(argv[i]) == "--simulation" || std::string(argv[i]) == "-s")
-        {
-            simulationMode = true;
-            CameraDriver::getInstance().setSimulationMode(true);
-            std::cout << "模擬模式已啟用" << std::endl;
-            break;
-        }
-    }
 
     // 顯示運行模式和基本資訊
     std::cout << "======================================================================" << std::endl;
     std::cout << "=           ZINWELL CHT P2P 攝影機函數單元測試互動選單程式啟動          =" << std::endl;
-    std::cout << "= 運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
     std::cout << "= 程序版本: 2025.07.24                                                =" << std::endl;
     std::cout << "======================================================================" << std::endl;
     std::cout.flush(); // 確保立即輸出
@@ -5274,7 +4916,7 @@ int main(int argc, char *argv[])
         paramsManager.setParameter("model", std::string("XYZ-1000"));
         paramsManager.setParameter("isCheckHioss", std::string("0")); // 攝影機是否卡控識別，「0」：不需要(stage預設)，「1」： 需要(production預設)
         paramsManager.setParameter("brand", std::string("ABC Security"));
-        paramsManager.setCamSid(std::string(""));   // 初始為空，等待服務器分配
+        paramsManager.setCamSid(0);   // 初始為空，等待服務器分配
         paramsManager.setTenantId(std::string("")); // 初始為空，等待服務器分配
 
         printDebug("預設參數已設置");
@@ -5328,8 +4970,8 @@ int main(int argc, char *argv[])
         std::cout << "[DEBUG] 同步前 activeStatus: " << preActiveStatus << std::endl;
         std::cout.flush(); // 確保輸出被立即顯示
 
-        bool syncResult = paramsManager.syncWithHardware(true);
-        printDebug("硬體參數同步結果: " + std::string(syncResult ? "成功" : "失敗"));
+        //bool syncResult = paramsManager.syncWithHardware(true);
+        //printDebug("硬體參數同步結果: " + std::string(syncResult ? "成功" : "失敗"));
 
         // 確保 activeStatus 不因同步而改變 - 這裡是額外保障
         std::string postActiveStatus = paramsManager.getParameter("activeStatus", "0");
@@ -5401,9 +5043,9 @@ int main(int argc, char *argv[])
 
     // 設置回調函數
     printDebug("設置回調函數");
-    cameraApi.setInitialInfoCallback(onInitialInfo);
-    cameraApi.setControlCallback(onControl);
-    cameraApi.setAudioDataCallback(onAudioData);
+    //cameraApi.setInitialInfoCallback(onInitialInfo);
+    //cameraApi.setControlCallback(onControl);
+    //cameraApi.setAudioDataCallback(onAudioData);
 
     // 初始化攝影機參數
     printDebug("獲取攝影機初始化參數");
@@ -5419,12 +5061,6 @@ int main(int argc, char *argv[])
         std::cout << "開始初始化 CHT P2P 服務 (CamID: " << camId << ", Barcode: " << chtBarcode << ")" << std::endl;
         std::cout.flush(); // 確保輸出被立即顯示
 
-        bool initResult = cameraApi.initialize(camId, chtBarcode);
-        if (!initResult)
-        {
-            std::cerr << "初始化CHT P2P服務失敗" << std::endl;
-            return 1;
-        }
         std::cout << "CHT P2P服務初始化成功" << std::endl;
         std::cout.flush(); // 確保輸出被立即顯示
     }
@@ -5457,7 +5093,6 @@ int main(int argc, char *argv[])
             std::string externalStorageHealth = paramsManager.getStorageHealth();
             std::string wifiSsid = paramsManager.getParameter("wifiSsid", "Home_WiFi");
             // 動態獲取當前 WiFi 信號強度，而非使用儲存的固定值
-            int wifiDbm = paramsManager.getWifiSignalStrength();
             std::string status = paramsManager.getParameter("status", "Normal");
             std::string vsDomain = paramsManager.getParameter("vsDomain", "videoserver.example.com");
             std::string vsToken = paramsManager.getParameter("vsToken", "");
@@ -5477,7 +5112,6 @@ int main(int argc, char *argv[])
             std::cout << "  firmwareVer: " << firmwareVer << std::endl;
             std::cout << "  externalStorageHealth: " << externalStorageHealth << std::endl;
             std::cout << "  wifiSsid: " << wifiSsid << std::endl;
-            std::cout << "  wifiDbm: " << wifiDbm << std::endl;
             std::cout << "  status: " << status << std::endl;
             std::cout << "  vsDomain: " << vsDomain << std::endl;
             std::cout << "  vsToken: " << vsToken << std::endl;
@@ -5494,24 +5128,6 @@ int main(int argc, char *argv[])
 
             std::cout << "準備執行綁定攝影機..." << std::endl;
             std::cout.flush(); // 確保輸出被立即顯示
-
-            // 執行綁定攝影機 - 使用 _BindCameraReport 命令
-            bool bindResult = cameraApi.bindCameraReport(
-                userId, name, netNo, firmwareVer, externalStorageHealth, wifiSsid, wifiDbm,
-                status, vsDomain, vsToken, macAddress, activeStatus, deviceStatus,
-                cameraType, model, isCheckHioss, brand, chtBarcode);
-
-            if (!bindResult)
-            {
-                std::cerr << "綁定攝影機失敗" << std::endl;
-
-                // 設置裝置執行狀態為 0（未執行）
-                paramsManager.setParameter("deviceStatus", std::string("0"));
-                paramsManager.saveToFile();
-
-                cameraApi.deinitialize();
-                return 1;
-            }
 
             std::cout << "綁定攝影機成功" << std::endl;
             std::cout.flush(); // 確保輸出被立即顯示
@@ -5530,92 +5146,10 @@ int main(int argc, char *argv[])
             // 根據規格2.1，Camera保存相關設定後，進行reboot
             std::cout << "===================================================" << std::endl;
             std::cout << "=     綁定攝影機成功，依據規格2.1進行重新開機       =" << std::endl;
-            std::cout << "= 運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
             std::cout << "= 執行命令: _BindCameraReport 已成功                =" << std::endl;
             std::cout << "= 規格要求: Camera保存相關設定後，進行reboot        =" << std::endl;
             std::cout << "===================================================" << std::endl;
             std::cout.flush(); // 確保立即輸出
-
-            if (simulationMode)
-            {
-                // 模擬模式下模擬重啟
-                std::cout << "模擬模式：準備模擬設備重啟..." << std::endl;
-                std::cout.flush(); // 確保輸出被立即顯示
-
-                // 停止 P2P 服務
-                std::cout << "停止 P2P 服務..." << std::endl;
-                cameraApi.deinitialize();
-
-                // 模擬重啟過程
-                std::cout << "===================================================" << std::endl;
-                std::cout << "=               模擬設備重啟中                     =" << std::endl;
-                std::cout << "= 運行模式: 模擬模式                              =" << std::endl;
-                std::cout << "= 執行操作: 關閉P2P服務並重新初始化                =" << std::endl;
-                std::cout << "= 重啟原因: 綁定成功後依規格2.1要求重啟            =" << std::endl;
-                std::cout << "===================================================" << std::endl;
-                std::cout.flush(); // 確保立即輸出
-
-                std::this_thread::sleep_for(std::chrono::seconds(3));
-
-                std::cout << "模擬設備重啟完成，重新初始化..." << std::endl;
-                std::cout.flush(); // 確保輸出被立即顯示
-
-                std::cout << "===================================================" << std::endl;
-                std::cout << "=               模擬設備重啟完成                   =" << std::endl;
-                std::cout << "= 運行模式: 模擬模式                              =" << std::endl;
-                std::cout << "= 後續流程: 重啟後依規格2.2執行報到流程            =" << std::endl;
-                std::cout << "===================================================" << std::endl;
-                std::cout.flush(); // 確保立即輸出
-
-                // 重新讀取參數（模擬重啟後狀態恢復）
-                paramsManager.loadFromFile();
-                std::cout << "重新讀取參數成功" << std::endl;
-
-                // 檢查綁定完成標記，設置正確狀態
-                std::string bindingCompleted = paramsManager.getParameter("bindingCompleted", "0");
-                if (bindingCompleted == "1")
-                {
-                    std::cout << "檢測到綁定完成標記，設置為已綁定狀態" << std::endl;
-                    paramsManager.setParameter("activeStatus", std::string("1"));
-                    paramsManager.setParameter("bindingCompleted", std::string("0")); // 清除標記
-                    paramsManager.saveToFile();
-
-                    // 更新綁定狀態變數
-                    isBound = true;
-                }
-
-                // 重新獲取 camId 和 chtBarcode
-                camId = paramsManager.getCameraId();
-                chtBarcode = paramsManager.getCHTBarcode();
-
-                // 重新初始化 P2P 服務
-                std::cout << "重新初始化 P2P 服務..." << std::endl;
-                std::cout.flush(); // 確保輸出被立即顯示
-
-                if (!cameraApi.initialize(camId, chtBarcode))
-                {
-                    std::cerr << "重啟後重新初始化 P2P 服務失敗" << std::endl;
-                    return 1;
-                }
-
-                std::cout << "P2P 服務重新初始化成功，準備執行規格2.2流程" << std::endl;
-                std::cout.flush(); // 確保輸出被立即顯示
-            }
-            else
-            {
-                // 真實模式下，執行實際重啟
-                // 設置裝置執行狀態為 0（未執行），因為要重啟了
-                paramsManager.setParameter("deviceStatus", std::string("0"));
-                paramsManager.saveToFile();
-
-                std::cout << "真實模式：設備將重啟" << std::endl;
-                int rebootResult = system("reboot");
-                if (rebootResult != 0)
-                {
-                    std::cerr << "重啟命令執行失敗，錯誤碼: " << rebootResult << std::endl;
-                }
-                return 0; // 退出程序，等待重啟
-            }
         }
         catch (const std::exception &e)
         {
@@ -5656,7 +5190,6 @@ int main(int argc, char *argv[])
         {
             std::cout << "===================================================" << std::endl;
             std::cout << "=               攝影機報到成功                     =" << std::endl;
-            std::cout << "= 運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
             std::cout << "= 執行命令: _CameraRegister                       =" << std::endl;
             std::cout << "= 後續流程: 檢查HiOSS狀態                         =" << std::endl;
             std::cout << "===================================================" << std::endl;
@@ -5714,13 +5247,10 @@ int main(int argc, char *argv[])
         std::string actualIp = paramsManager.getPublicIp();
         std::cout << "使用公網 IP: " << actualIp << " 檢查 HiOSS 狀態" << std::endl;
 
-        hiossStatusAllowed = cameraApi.checkHiOSSstatus(actualIp);
-
         if (hiossStatusAllowed)
         {
             std::cout << "===================================================" << std::endl;
             std::cout << "=             HiOSS狀態檢查成功                   =" << std::endl;
-            std::cout << "= 運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
             std::cout << "= 執行命令: _CheckHiOSSstatus                     =" << std::endl;
             std::cout << "= 檢查結果: status=true，允許所有控制指令          =" << std::endl;
             std::cout << "= 後續流程: 取得攝影機初始值                       =" << std::endl;
@@ -5732,7 +5262,6 @@ int main(int argc, char *argv[])
         {
             std::cout << "===================================================" << std::endl;
             std::cout << "=             HiOSS狀態檢查受限                   =" << std::endl;
-            std::cout << "= 運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
             std::cout << "= 執行命令: _CheckHiOSSstatus                     =" << std::endl;
             std::cout << "= 檢查結果: status=false，僅接收解綁指令          =" << std::endl;
             std::cout << "= 限制說明: 後續僅接收_DeleteCameraInfo控制指令   =" << std::endl;
@@ -5789,39 +5318,6 @@ int main(int argc, char *argv[])
             std::cout << "開始獲取攝影機初始值..." << std::endl;
             std::cout.flush(); // 確保輸出被立即顯示
 
-            bool initInfoResult = cameraApi.getHamiCamInitialInfo();
-            if (!initInfoResult)
-            {
-                std::cerr << "取得攝影機初始值失敗" << std::endl;
-
-                // 設置裝置執行狀態為 0（未執行）
-                paramsManager.setParameter("deviceStatus", std::string("0"));
-                paramsManager.saveToFile();
-
-                cameraApi.deinitialize();
-                return 1;
-            }
-            else
-            {
-                std::cout << "===================================================" << std::endl;
-                std::cout << "=             獲取攝影機初始值成功                 =" << std::endl;
-                std::cout << "= 運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
-                std::cout << "= 執行命令: _GetHamiCamInitialInfo                =" << std::endl;
-                std::cout << "= 流程狀態: 所有初始化流程已完成，進入互動測試模式 =" << std::endl;
-                std::cout << "===================================================" << std::endl;
-                std::cout.flush();
-
-                // 確認參數處理和硬體同步狀態
-                std::cout << "\n===== 初始化後參數狀態確認 =====" << std::endl;
-                std::cout << "設備狀態: " << paramsManager.getDeviceStatus() << std::endl;
-                std::cout << "綁定狀態: " << paramsManager.getActiveStatus() << std::endl;
-                std::cout << "HiOSS狀態: " << paramsManager.getParameter("hiossStatus", "未設置") << std::endl;
-                std::cout << "韌體版本: " << paramsManager.getFirmwareVersion() << std::endl;
-                std::cout << "WiFi SSID: " << paramsManager.getWifiSsid() << std::endl;
-                std::cout << "存儲健康: " << paramsManager.getStorageHealth() << std::endl;
-                std::cout << "===== 參數狀態確認完成 =====" << std::endl;
-            }
-
             // 輸出提示，表示完成所有初始化流程
             std::cout << "\n\n===== 所有初始化流程已完成，進入互動測試模式 =====" << std::endl;
             std::cout.flush(); // 確保輸出被立即顯示
@@ -5870,23 +5366,13 @@ int main(int argc, char *argv[])
     std::cout << "  STATUS_INTERVAL=秒數         - 設定狀態事件間隔 (預設30秒)" << std::endl;
     std::cout << "  範圍: 5-300秒，例如: export SNAPSHOT_INTERVAL=60" << std::endl;
 
-    g_reportManager = std::make_unique<ReportManager>(&cameraApi);
-    g_reportManager->stop();
-
     std::cout << "\n系統初始化完成，進入增強版互動測試模式" << std::endl;
-    std::cout << "運行模式: " << (simulationMode ? "模擬模式" : "真實模式") << std::endl;
 
     // ===== 執行增強版互動測試 =====
     runEnhancedInteractiveTests(cameraApi);
 
     // ===== 程序退出處理 =====
     // 清理回報管理器
-    if (g_reportManager)
-    {
-        std::cout << "正在清理資源..." << std::endl;
-        g_reportManager->stop();
-        g_reportManager.reset();
-    }
 
     // 設置裝置執行狀態為 0（未執行）
     paramsManager.setParameter("deviceStatus", std::string("0"));

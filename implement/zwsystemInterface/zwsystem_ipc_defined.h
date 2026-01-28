@@ -86,13 +86,15 @@ typedef enum zwsystem_ipc_command_e {
     //_UpdateCameraAISetting,        /**更新攝影機AI設定資訊*/
     _SetCameraAISetting,           /**更新攝影機AI設定資訊*/
     _GetCameraAISetting,           /**取得攝影機AI設定資訊*/
-    _GetVideoLiveStream,           /**取得即時影音RTP串流*/
-    _StopVideoLiveStream,          /**停止即時影音RTP串流*/
-    _GetVideoHistoryStream,        /**取得歷史影音RTP串流*/
-    _StopVideoHistoryStream,       /**停止歷史影音RTP串流*/
+    //_GetVideoLiveStream,           /**取得即時影音RTP串流*/
+    //_StopVideoLiveStream,          /**停止即時影音RTP串流*/
+    //_GetVideoHistoryStream,        /**取得歷史影音RTP串流*/
+    //_StopVideoHistoryStream,       /**停止歷史影音RTP串流*/
+    _StartVideoStream,              /**取得影音串流*/
+    _StopVideoStream,               /**停止影音串流*/
     _GetVideoScheduleStream,        /**取得排程影音RTP串流*/
     _StopVideoScheduleStream,       /**停止排程影音RTP串流*/
-    _SendAudioStream,              /**傳送雙向語音RTP串流*/
+    _StartAudioStream,              /**傳送雙向語音RTP串流*/
     _StopAudioStream,               /**停止傳送雙向語音RTP串流*/
 
     // Extend

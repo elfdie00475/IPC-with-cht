@@ -112,7 +112,7 @@ private:
     static std::string handleStopVideoHistoryStream(ChtP2PCameraControlHandler *self, const std::string &payload);
     static std::string handleSendAudioStream(ChtP2PCameraControlHandler *self, const std::string &payload);
     static std::string handleStopAudioStream(ChtP2PCameraControlHandler *self, const std::string &payload);
-#if 1 // jeffery added 20250805
+#if 0 // jeffery added 20250805
     static std::string handleGetVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload);
     static std::string handleStopVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload);
 #endif

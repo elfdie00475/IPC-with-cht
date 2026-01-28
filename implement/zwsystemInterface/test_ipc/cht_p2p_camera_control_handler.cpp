@@ -4,31 +4,18 @@
  * @date 2025/04/29
  */
 
-
-#include <stddef.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
-#include <cstdio>
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>   // prefer this over <stddef.h>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-
-#include <algorithm>
-#include <chrono>
-#include <fstream>
-#include <ctime>
-
-#include <algorithm>
-#include <chrono>
 #include <fstream>
 #include <future>
-#include <iomanip>
-#include <iostream>
-#include <map>
-#include <regex>
-#include <sstream>
-#include <thread>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -45,7 +32,6 @@
 #include "zwsystem_ipc_client.h"
 
 #include "cht_p2p_camera_control_handler.h"
-#include "cht_p2p_agent_payload_defined.h"
 #include "camera_parameters_manager.h"
 #include "cht_p2p_agent_payload_defined.h"
 #include "timezone_utils.h"
@@ -364,6 +350,18 @@ static int GetIntMember(const rapidjson::Value& obj, const char* key)
     return it->value.GetInt();
 }
 
+static int64_t GetInt64Member(const rapidjson::Value& obj, const char* key)
+{
+    if (!obj.IsObject())
+        throw std::runtime_error("Expected object when accessing member: " + std::string(key));
+
+    auto it = obj.FindMember(key);
+    if (it == obj.MemberEnd() || !it->value.IsInt64())
+        throw std::runtime_error("Missing or not int: " + std::string(key));
+
+    return it->value.GetInt64();
+}
+
 static bool GetBoolMember(const rapidjson::Value& obj, const char* key)
 {
     if (!obj.IsObject())
@@ -533,8 +531,10 @@ void ChtP2PCameraControlHandler::registerDefaultHandlers(void)
     registerHandler(_SendAudioStream, &ChtP2PCameraControlHandler::handleSendAudioStream);
     registerHandler(_StopAudioStream, &ChtP2PCameraControlHandler::handleStopAudioStream);
     registerHandler(_SetCamEventStorageDay, &ChtP2PCameraControlHandler::handleSetCamEventStorageDay);
+#if 0
     registerHandler(_GetVideoScheduleStream, &ChtP2PCameraControlHandler::handleGetVideoScheduleStream);
     registerHandler(_StopVideoScheduleStream, &ChtP2PCameraControlHandler::handleStopVideoScheduleStream);
+#endif
 }
 
 // 驗證camId的輔助函數
@@ -560,423 +560,328 @@ static bool validateCamId(const rapidjson::Document& request,
 
 #define BOOL2STR(x) ((x)?"1":"0")
 
-// 各控制命令的默認處理實現
-std::string ChtP2PCameraControlHandler::handleGetCamStatusById(ChtP2PCameraControlHandler *self, const std::string &payload)
+template <typename MiddleFn>
+static std::string handleWithCommonFlow(
+    ChtP2PCameraControlHandler* self,
+    const std::string& payload,
+    const char* logTitle,
+    MiddleFn&& middleFn)
 {
-    std::cout << "處理獲取攝影機狀態: " << payload << std::endl;
+    std::cout << logTitle << ": " << payload << std::endl;
 
-    try
-    {
+    try {
         // 解析請求 JSON
         rapidjson::Document requestJson;
         rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+        if (parseResult.IsError()) {
+            std::cerr << "解析請求JSON失敗: "
+                      << rapidjson::GetParseError_En(parseResult.Code())
+                      << std::endl;
             throw std::runtime_error("JSON 格式錯誤");
         }
 
         // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
+        auto& paramsManager = CameraParametersManager::getInstance();
         const std::string& saved_camId = paramsManager.getCameraId();
-        const std::string& saved_tenantId = paramsManager.getTenantId();
-        const std::string& saved_netNo = paramsManager.getNetNo();
-        int saved_sid = paramsManager.getCamSid();
-        const std::string& saved_userId = paramsManager.getUserId();
-        const std::string& saved_firmwareVer = paramsManager.getFirmwareVersion();
-        const std::string& saved_lastVer = paramsManager.getLatestFirmwareVersion();
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
+        std::string errMsg;
+        if (!validateCamId(requestJson, saved_camId, errMsg)) {
             throw std::runtime_error(errMsg);
         }
 
-        // 從請求中獲取參數（驗證用）
-        const std::string& tenantId = GetStringMember(requestJson, PAYLOAD_KEY_TENANT_ID);
-        const std::string& netNo = GetStringMember(requestJson, PAYLOAD_KEY_TENANT_ID);
-        int camSid = GetIntMember(requestJson, PAYLOAD_KEY_CAMSID);
-        const std::string& userId = GetStringMember(requestJson, PAYLOAD_KEY_UID);
-
-        std::cout << "請求參數 - "
-                  << ", tenantId: " << tenantId
-                  << ", netNo: " << netNo
-                  << ", camSid: " << std::to_string(camSid)
-                  << ", userId: " << userId << std::endl;
-
-        if (tenantId != saved_tenantId || netNo != saved_netNo || userId != saved_userId)
-        {
-            throw std::runtime_error("camera parameter is invalid!!!");
-        }
-
-        // 獲取當前攝影機參數
-        stCamStatusByIdReq stReq;
-        stCamStatusByIdRep stRep;
-        int rc = zwsystem_ipc_getCamStatusById(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 從請求或參數管理器獲取其他資訊
-        std::cout << "準備回傳的參數:" << std::endl;
-        std::cout << "  camId: " << saved_camId << std::endl;
-        std::cout << "  firmwareVer: " << saved_firmwareVer << std::endl;
-        std::cout << "  latestVersion: " << saved_lastVer << std::endl;
-        std::cout << "  name: " << stRep.name << std::endl;
-        std::cout << "  status: " << zwsystem_ipc_status_int2str(stRep.status) << std::endl;
-        std::cout << "  storageHealth: " << zwsystem_ipc_health_int2str(stRep.externalStorageHealth) << std::endl;
-        std::cout << "  storageCapacity: " << stRep.externalStorageCapacity << std::endl;
-        std::cout << "  storageAvailable: " << stRep.externalStorageAvailable << std::endl;
-        std::cout << "  wifiSsid: " << stRep.wifiSsid << std::endl;
-        std::cout << "  wifiDbm: " << stRep.wifiDbm << std::endl;
-        std::cout << "  microphoneEnabled: " << stRep.isMicrophone << std::endl;
-        std::cout << "  speakerVolume: " << stRep.speakVolume << std::endl;
-        std::cout << "  imageQuality: " << stRep.imageQuality << std::endl;
-        std::cout << "  activeStatus: " << stRep.activeStatus << std::endl;
-
-        // 構建回應 JSON（按照 CHT 規格）
+        // 共用：先準備 response，交給中間段去填內容
         rapidjson::Document response;
         response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
 
-        // 按照 CHT 規格的欄位順序和格式
 
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+        // 變動的部份：用 lambda 注入
+        // 建議傳 requestJson / response ，讓 lambda 只做差異段工作
+        middleFn(requestJson, response);
 
-        AddString(response, PAYLOAD_KEY_CAMID, saved_camId);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "");
-        AddString(response, PAYLOAD_KEY_TENANT_ID, saved_tenantId);
-        AddString(response, PAYLOAD_KEY_NETNO, saved_netNo);
-        AddString(response, PAYLOAD_KEY_FIRMWARE_VER, saved_firmwareVer);
-        AddString(response, PAYLOAD_KEY_LATEST_VERSION, saved_lastVer);
-        AddString(response, PAYLOAD_KEY_IS_MICROPHONE, BOOL2STR(stRep.isMicrophone));
-        AddString(response, PAYLOAD_KEY_SPEAK_VOLUME, std::to_string(stRep.speakVolume));
-        AddString(response, PAYLOAD_KEY_IMAGE_QUALITY, std::to_string(stRep.imageQuality));
-        AddString(response, PAYLOAD_KEY_ACTIVE_STATUS, BOOL2STR(stRep.activeStatus));
-        AddString(response, PAYLOAD_KEY_NAME, stRep.name);
-        AddString(response, PAYLOAD_KEY_STATUS, zwsystem_ipc_status_int2str(stRep.status));
-        AddString(response, PAYLOAD_KEY_EXTERNAL_STORAGE_HEALTH, zwsystem_ipc_health_int2str(stRep.externalStorageHealth));
-        AddString(response, PAYLOAD_KEY_EXTERNAL_STORAGE_CAPACITY, stRep.externalStorageCapacity);
-        AddString(response, PAYLOAD_KEY_EXTERNAL_STORAGE_AVAILABLE, stRep.externalStorageAvailable);
-        AddString(response, PAYLOAD_KEY_WIFI_SSID, stRep.wifiSsid);
-        response.AddMember(PAYLOAD_KEY_WIFI_DBM, stRep.wifiDbm, allocator);
-
-        // 轉換為 JSON 字符串
+        // 共用：序列化回傳
         rapidjson::StringBuffer buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
         response.Accept(writer);
-
-        std::string responseStr = buffer.GetString();
-        std::cout << "回傳 JSON: " << responseStr << std::endl;
-
-        return responseStr;
+        return buffer.GetString();
     }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理獲取攝影機狀態時發生異常: " << e.what() << std::endl;
-        std::string desc = "處理獲取攝影機狀態時發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
+    catch (const std::exception& e) {
+        std::cerr << logTitle << " 時發生異常: " << e.what() << std::endl;
+        std::string desc = std::string(logTitle) + " 時發生異常: " + e.what();
 
+        std::string outResult;
+        createErrorResponse(desc, outResult);
         return outResult;
     }
+}
 
-    return "";
+// 各控制命令的默認處理實現
+std::string ChtP2PCameraControlHandler::handleGetCamStatusById(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理獲取攝影機狀態",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                // 從參數管理器獲取最新參數
+                auto &paramsManager = CameraParametersManager::getInstance();
+                const std::string& saved_camId = paramsManager.getCameraId();
+                const std::string& saved_tenantId = paramsManager.getTenantId();
+                const std::string& saved_netNo = paramsManager.getNetNo();
+                int saved_sid = paramsManager.getCamSid();
+                const std::string& saved_userId = paramsManager.getUserId();
+                const std::string& saved_firmwareVer = paramsManager.getFirmwareVersion();
+                const std::string& saved_lastVer = paramsManager.getLatestFirmwareVersion();
+
+                // 從請求中獲取參數（驗證用）
+                const std::string& tenantId = GetStringMember(requestJson, PAYLOAD_KEY_TENANT_ID);
+                const std::string& netNo = GetStringMember(requestJson, PAYLOAD_KEY_TENANT_ID);
+                int camSid = GetIntMember(requestJson, PAYLOAD_KEY_CAMSID);
+                const std::string& userId = GetStringMember(requestJson, PAYLOAD_KEY_UID);
+
+                std::cout << "請求參數 - "
+                        << ", tenantId: " << tenantId
+                        << ", netNo: " << netNo
+                        << ", camSid: " << std::to_string(camSid)
+                        << ", userId: " << userId << std::endl;
+
+                if (tenantId != saved_tenantId || netNo != saved_netNo || userId != saved_userId)
+                {
+                    throw std::runtime_error("camera parameter is invalid!!!");
+                }
+
+                // 獲取當前攝影機參數
+                stCamStatusByIdReq stReq;
+                stCamStatusByIdRep stRep;
+                int rc = zwsystem_ipc_getCamStatusById(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                // 從請求或參數管理器獲取其他資訊
+                std::cout << "準備回傳的參數:" << std::endl;
+                std::cout << "  camId: " << saved_camId << std::endl;
+                std::cout << "  firmwareVer: " << saved_firmwareVer << std::endl;
+                std::cout << "  latestVersion: " << saved_lastVer << std::endl;
+                std::cout << "  name: " << stRep.name << std::endl;
+                std::cout << "  status: " << zwsystem_ipc_status_int2str(stRep.status) << std::endl;
+                std::cout << "  storageHealth: " << zwsystem_ipc_health_int2str(stRep.externalStorageHealth) << std::endl;
+                std::cout << "  storageCapacity: " << stRep.externalStorageCapacity << std::endl;
+                std::cout << "  storageAvailable: " << stRep.externalStorageAvailable << std::endl;
+                std::cout << "  wifiSsid: " << stRep.wifiSsid << std::endl;
+                std::cout << "  wifiDbm: " << stRep.wifiDbm << std::endl;
+                std::cout << "  microphoneEnabled: " << stRep.isMicrophone << std::endl;
+                std::cout << "  speakerVolume: " << stRep.speakVolume << std::endl;
+                std::cout << "  imageQuality: " << stRep.imageQuality << std::endl;
+                std::cout << "  activeStatus: " << stRep.activeStatus << std::endl;
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+
+                AddString(response, PAYLOAD_KEY_CAMID, saved_camId);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "");
+                AddString(response, PAYLOAD_KEY_TENANT_ID, saved_tenantId);
+                AddString(response, PAYLOAD_KEY_NETNO, saved_netNo);
+                AddString(response, PAYLOAD_KEY_FIRMWARE_VER, saved_firmwareVer);
+                AddString(response, PAYLOAD_KEY_LATEST_VERSION, saved_lastVer);
+                AddString(response, PAYLOAD_KEY_IS_MICROPHONE, BOOL2STR(stRep.isMicrophone));
+                AddString(response, PAYLOAD_KEY_SPEAK_VOLUME, std::to_string(stRep.speakVolume));
+                AddString(response, PAYLOAD_KEY_IMAGE_QUALITY, std::to_string(stRep.imageQuality));
+                AddString(response, PAYLOAD_KEY_ACTIVE_STATUS, BOOL2STR(stRep.activeStatus));
+                AddString(response, PAYLOAD_KEY_NAME, stRep.name);
+                AddString(response, PAYLOAD_KEY_STATUS, zwsystem_ipc_status_int2str(stRep.status));
+                AddString(response, PAYLOAD_KEY_EXTERNAL_STORAGE_HEALTH, zwsystem_ipc_health_int2str(stRep.externalStorageHealth));
+                AddString(response, PAYLOAD_KEY_EXTERNAL_STORAGE_CAPACITY, stRep.externalStorageCapacity);
+                AddString(response, PAYLOAD_KEY_EXTERNAL_STORAGE_AVAILABLE, stRep.externalStorageAvailable);
+                AddString(response, PAYLOAD_KEY_WIFI_SSID, stRep.wifiSsid);
+                response.AddMember(PAYLOAD_KEY_WIFI_DBM, stRep.wifiDbm, allocator);
+            }
+        );
 }
 
 
 std::string ChtP2PCameraControlHandler::handleDeleteCameraInfo(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理解綁攝影機指令: " << payload << std::endl;
+    return handleWithCommonFlow(self, payload, "處理解綁攝影機指令",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+                stDeleteCameraInfoReq stReq;
+                stDeleteCameraInfoRep stRep;
+                int rc = zwsystem_ipc_deleteCameraInfo(stReq, &stRep);
+                if (rc < 0 || stRep.code != 0) {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                // 檢查當前HiOSS狀態
+                bool saved_hiOssStatus = paramsManager.getHiOssStatus();
+                std::cout << "解綁前HiOSS狀態: " << (saved_hiOssStatus? "允許模式" : "受限模式") << std::endl;
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                // ===== 清除伺服器分配的資訊 =====
+                std::cout << "2. 清除伺服器分配的資訊..." << std::endl;
+                paramsManager.setCamSid(0);
+                paramsManager.setTenantId("");
+                paramsManager.setUserId("");
+                std::cout << "   - camSid: (已清除)" << std::endl;
+                std::cout << "   - tenantId: (已清除)" << std::endl;
+                std::cout << "   - userId: (已清除)" << std::endl;
 
-        std::cout << "開始清除綁定相關參數..." << std::endl;
+                // ===== 清除網路/服務相關參數 =====
+                std::cout << "3. 清除網路和服務相關參數..." << std::endl;
+                paramsManager.setNetNo("");
+                paramsManager.setVsDomain("");
+                paramsManager.setVsToken("");
+                paramsManager.setPublicIp(""); // 清除伺服器分配的公網IP
+                std::cout << "   - netNo: (已清除)" << std::endl;
+                std::cout << "   - vsDomain: (已清除)" << std::endl;
+                std::cout << "   - vsToken: (已清除)" << std::endl;
+                std::cout << "   - publicIp: (已清除)" << std::endl;
 
-        stDeleteCameraInfoReq stReq;
-        stDeleteCameraInfoRep stRep;
-        int rc = zwsystem_ipc_deleteCameraInfo(stReq, &stRep);
-        if (rc < 0 || stRep.code != 0) {
-            throw std::runtime_error("system service error!!!");
-        }
+                // ===== 重設HiOSS狀態 - 解綁後允許重新綁定和檢查 =====
+                std::cout << "7. 重設HiOSS狀態..." << std::endl;
+                // 重設HiOSS狀態 - 解綁後允許重新綁定和檢查
+                paramsManager.setIsCheckHioss(false);
+                paramsManager.setHiOssStatus(false);
+                std::cout << "  重設 HiOSS 狀態為允許模式，設備可重新進行綁定流程" << std::endl;
+                std::cout << "   - HiOSS狀態: 1 (允許模式)" << std::endl;
+                std::cout << "   ★ 重要：HiOSS狀態已重設為允許模式" << std::endl;
+                std::cout << "   ★ 設備現在可以接收所有控制指令" << std::endl;
+                std::cout << "   ★ 控制指令限制已完全解除" << std::endl;
 
-        // 檢查當前HiOSS狀態
-        bool saved_hiOssStatus = paramsManager.getHiOssStatus();
-        std::cout << "解綁前HiOSS狀態: " << (saved_hiOssStatus? "允許模式" : "受限模式") << std::endl;
+                // ===== 重設時區為預設（台北時區）=====
+                std::cout << "9. 重設時區..." << std::endl;
+                const std::string defaultTid = TimezoneUtils::getDefaultTimezoneId();
+                paramsManager.setTimeZone(defaultTid);
+                std::cout << "   - 時區: " << defaultTid << std::endl;
 
-        // ===== 清除伺服器分配的資訊 =====
-        std::cout << "2. 清除伺服器分配的資訊..." << std::endl;
-        paramsManager.setCamSid(0);
-        paramsManager.setTenantId("");
-        paramsManager.setUserId("");
-        std::cout << "   - camSid: (已清除)" << std::endl;
-        std::cout << "   - tenantId: (已清除)" << std::endl;
-        std::cout << "   - userId: (已清除)" << std::endl;
+                // 保存組態到檔案
+                std::cout << "\n=== 保存設定到檔案 ===" << std::endl;
+                bool saveResult = paramsManager.saveToFile();
+                std::cout << "攝影機解綁完成，設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
+                std::cout << "HiOSS狀態已重設，控制指令限制已解除" << std::endl;
+                std::cout << "設備已恢復為初始未綁定狀態，可重新進行綁定流程" << std::endl;
 
-        // ===== 清除網路/服務相關參數 =====
-        std::cout << "3. 清除網路和服務相關參數..." << std::endl;
-        paramsManager.setNetNo("");
-        paramsManager.setVsDomain("");
-        paramsManager.setVsToken("");
-        paramsManager.setPublicIp(""); // 清除伺服器分配的公網IP
-        std::cout << "   - netNo: (已清除)" << std::endl;
-        std::cout << "   - vsDomain: (已清除)" << std::endl;
-        std::cout << "   - vsToken: (已清除)" << std::endl;
-        std::cout << "   - publicIp: (已清除)" << std::endl;
-
-        // ===== 重設HiOSS狀態 - 解綁後允許重新綁定和檢查 =====
-        std::cout << "7. 重設HiOSS狀態..." << std::endl;
-        // 重設HiOSS狀態 - 解綁後允許重新綁定和檢查
-        paramsManager.setIsCheckHioss(false);
-        paramsManager.setHiOssStatus(false);
-        std::cout << "  重設 HiOSS 狀態為允許模式，設備可重新進行綁定流程" << std::endl;
-        std::cout << "   - HiOSS狀態: 1 (允許模式)" << std::endl;
-        std::cout << "   ★ 重要：HiOSS狀態已重設為允許模式" << std::endl;
-        std::cout << "   ★ 設備現在可以接收所有控制指令" << std::endl;
-        std::cout << "   ★ 控制指令限制已完全解除" << std::endl;
-
-        // ===== 重設時區為預設（台北時區）=====
-        std::cout << "9. 重設時區..." << std::endl;
-        const std::string defaultTid = TimezoneUtils::getDefaultTimezoneId();
-        paramsManager.setTimeZone(defaultTid);
-        std::cout << "   - 時區: " << defaultTid << std::endl;
-
-        // 保存組態到檔案
-        std::cout << "\n=== 保存設定到檔案 ===" << std::endl;
-        bool saveResult = paramsManager.saveToFile();
-        std::cout << "攝影機解綁完成，設定已保存: " << (saveResult ? "成功" : "失敗") << std::endl;
-        std::cout << "HiOSS狀態已重設，控制指令限制已解除" << std::endl;
-        std::cout << "設備已恢復為初始未綁定狀態，可重新進行綁定流程" << std::endl;
-
-        // **返回成功格式（按照規範）**
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "攝影機解除綁定");
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "解綁攝影機時發生異常: " << e.what() << std::endl;
-        std::string desc = "解綁攝影機時發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "攝影機解除綁定");
+            }
+        );
 }
 
 
 std::string ChtP2PCameraControlHandler::handleSetTimeZone(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理設定時區: " << payload << std::endl;
+    return handleWithCommonFlow(self, payload, "處理設定時區",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+                const std::string& tId = GetStringMember(requestJson, PAYLOAD_KEY_TID);
+                std::cout << "設置時區 - tId: " << tId << std::endl;
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                // 檢查時區ID是否有效並獲取時區字串
+                const std::string& tzString = TimezoneUtils::getTimezoneString(tId);
+                if (tzString.empty())
+                {
+                    throw std::runtime_error("無效的時區ID: " + tId);
+                }
+                std::cout << "時區字串: " << tzString << std::endl;
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                // set TZ string into system service
+                stSetTimezoneReq stReq;
+                stSetTimezoneRep stRep;
+                stReq.updateBit = eDatetimeUpdateMask_Timezone;
+                snprintf(stReq.TZStr, ZWSYSTEM_IPC_STRING_SIZE, "%s", tzString.c_str());
+                stReq.daylightSavings = false;
+                int rc = zwsystem_ipc_setTimezone(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        const std::string& tId = GetStringMember(requestJson, PAYLOAD_KEY_TID);
+                // update this process timezone, maybe can wait subscribe
+                //TimezoneUtils.updateTimezone;
 
-        std::cout << "設置時區 - tId: " << tId << std::endl;
+                // 更新參數管理器
+                paramsManager.setTimeZone(tId);
+                paramsManager.saveToFile();
 
-        // 檢查時區ID是否有效並獲取時區字串
-        const std::string& tzString = TimezoneUtils::getTimezoneString(tId);
-        if (tzString.empty())
-        {
-            throw std::runtime_error("無效的時區ID: " + tId);
-        }
-        std::cout << "時區字串: " << tzString << std::endl;
-
-        // set TZ string into system service
-        stSetTimezoneReq stReq;
-        stSetTimezoneRep stRep;
-        stReq.updateBit = eDatetimeUpdateMask_Timezone;
-        snprintf(stReq.TZStr, ZWSYSTEM_IPC_STRING_SIZE, "%s", tzString.c_str());
-        stReq.daylightSavings = false;
-        int rc = zwsystem_ipc_setTimezone(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // update this process timezone, maybe can wait subscribe
-        //TimezoneUtils.updateTimezone;
-
-        // 更新參數管理器
-        paramsManager.setTimeZone(tId);
-        paramsManager.saveToFile();
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "時區設定成功回應");
-        AddString(response, PAYLOAD_KEY_TID, "tId");
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::cout << "時區設定成功回應: " << buffer.GetString() << std::endl;
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "設定時區時發生異常: " << e.what() << std::endl;
-        std::string desc = "設定時區時發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "時區設定成功回應");
+                AddString(response, PAYLOAD_KEY_TID, tId);
+            }
+        );
 }
 
 std::string ChtP2PCameraControlHandler::handleGetTimeZone(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理獲取時區: " << payload << std::endl;
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
-
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
-
-        std::string tId = paramsManager.getTimeZone();
-
-        // 如果時區為空，設為預設值
-        if (tId.empty())
-        {
-            tId = TimezoneUtils::getDefaultTimezoneId(); // 使用工具類別的預設值
-            const std::string& tzString = TimezoneUtils::getTimezoneString(tId);
-            if (tzString.empty())
+    return handleWithCommonFlow(self, payload, "處理獲取時區",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
             {
-                throw std::runtime_error("無效的時區ID: " + tId);
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
+
+                std::string tId = paramsManager.getTimeZone();
+
+                // 如果時區為空，設為預設值
+                if (tId.empty())
+                {
+                    tId = TimezoneUtils::getDefaultTimezoneId(); // 使用工具類別的預設值
+                    const std::string& tzString = TimezoneUtils::getTimezoneString(tId);
+                    if (tzString.empty())
+                    {
+                        throw std::runtime_error("無效的時區ID: " + tId);
+                    }
+
+                    // set TZ string into system service
+                    stSetTimezoneReq stReq;
+                    stSetTimezoneRep stRep;
+                    stReq.updateBit = eDatetimeUpdateMask_Timezone;
+                    snprintf(stReq.TZStr, ZWSYSTEM_IPC_STRING_SIZE, "%s", tzString.c_str());
+                    stReq.daylightSavings = false;
+                    int rc = zwsystem_ipc_setTimezone(stReq, &stRep);
+                    if (rc < 0 || stRep.code < 0)
+                    {
+                        throw std::runtime_error("system service error!!!");
+                    }
+
+                    paramsManager.setTimeZone(tId);
+                    paramsManager.saveToFile();
+                }
+
+                std::cout << "當前時區: " << tId << std::endl;
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "獲取時區成功回應");
+                AddString(response, PAYLOAD_KEY_TIMEZONE, tId);
+
+                // 加入時區列表 - 使用 TimezoneUtils 獲取完整資訊
+                rapidjson::Value timezoneAll(rapidjson::kArrayType);
+
+                // 從 TimezoneUtils 獲取所有時區資訊
+                const auto& timezoneInfoList = TimezoneUtils::getAllTimezoneInfo();
+                for (const auto &timezoneInfo : timezoneInfoList)
+                {
+                    rapidjson::Value timeZoneObj(rapidjson::kObjectType);
+                    AddString(timeZoneObj, PAYLOAD_KEY_TID, timezoneInfo.tId, allocator);
+                    AddString(timeZoneObj, PAYLOAD_KEY_DISPLAY_NAME, timezoneInfo.displayName, allocator);
+                    AddString(timeZoneObj, PAYLOAD_KEY_BASE_UTC_OFFSET, timezoneInfo.baseUtcOffset, allocator);
+
+                    timezoneAll.PushBack(timeZoneObj.Move(), allocator);
+                }
+
+                response.AddMember(PAYLOAD_KEY_TIMEZONE_ALL, timezoneAll, allocator);
             }
-
-            // set TZ string into system service
-            stSetTimezoneReq stReq;
-            stSetTimezoneRep stRep;
-            stReq.updateBit = eDatetimeUpdateMask_Timezone;
-            snprintf(stReq.TZStr, ZWSYSTEM_IPC_STRING_SIZE, "%s", tzString.c_str());
-            stReq.daylightSavings = false;
-            int rc = zwsystem_ipc_setTimezone(stReq, &stRep);
-            if (rc < 0 || stRep.code < 0)
-            {
-                throw std::runtime_error("system service error!!!");
-            }
-
-            paramsManager.setTimeZone(tId);
-            paramsManager.saveToFile();
-        }
-
-        std::cout << "當前時區: " << tId << std::endl;
-
-        // 構建時區資訊列表
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "獲取時區成功回應");
-        AddString(response, PAYLOAD_KEY_TIMEZONE, tId);
-
-        // 加入時區列表 - 使用 TimezoneUtils 獲取完整資訊
-        rapidjson::Value timezoneAll(rapidjson::kArrayType);
-
-        // 從 TimezoneUtils 獲取所有時區資訊
-        const auto& timezoneInfoList = TimezoneUtils::getAllTimezoneInfo();
-        for (const auto &timezoneInfo : timezoneInfoList)
-        {
-            rapidjson::Value timeZoneObj(rapidjson::kObjectType);
-            AddString(timeZoneObj, PAYLOAD_KEY_TID, timezoneInfo.tId, allocator);
-            AddString(timeZoneObj, PAYLOAD_KEY_DISPLAY_NAME, timezoneInfo.displayName, allocator);
-            AddString(timeZoneObj, PAYLOAD_KEY_BASE_UTC_OFFSET, timezoneInfo.baseUtcOffset, allocator);
-
-            timezoneAll.PushBack(timeZoneObj.Move(), allocator);
-        }
-
-        response.AddMember(PAYLOAD_KEY_TIMEZONE_ALL, timezoneAll, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::cout << "成功獲取時區資訊，包含 " << timezoneInfoList.size() << " 個時區" << std::endl;
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理獲取時區失敗: " << e.what() << std::endl;
-        std::string desc = "處理獲取時區失敗: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+        );
 }
 
 static int s_osd_render_utf8_next(const char *src, unsigned int src_len, unsigned int src_idx,
@@ -1037,73 +942,37 @@ static bool is_valid_utf8(const char *s, size_t len)
  ***************************************************************/
 std::string ChtP2PCameraControlHandler::handleUpdateCameraName(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理更新攝影機名稱: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+    return handleWithCommonFlow(self, payload, "處理更新攝影機名稱",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                const std::string& name = GetStringMember(requestJson, PAYLOAD_KEY_NAME);
+                std::cout << "更新攝影機名稱 - name: " << name << std::endl;
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                if (name.empty() || name.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
+                    throw std::runtime_error("name maybe empty or too long");
+                }
+                if (!is_valid_utf8(name.c_str(), name.size())) {
+                    throw std::runtime_error("name string format is invalid");
+                }
 
-        const std::string& name = GetStringMember(requestJson, PAYLOAD_KEY_NAME);
-        std::cout << "更新攝影機名稱 - name: " << name << std::endl;
+                stUpdateCameraNameReq stReq;
+                stUpdateCameraNameRep stRep;
+                snprintf(stReq.name, ZWSYSTEM_IPC_STRING_SIZE, "%s", name.c_str());
+                int rc = zwsystem_ipc_updateCameraName(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        if (name.empty() || name.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
-            throw std::runtime_error("name maybe empty or too long");
-        }
-        if (!is_valid_utf8(name.c_str(), name.size())) {
-            throw std::runtime_error("name string format is invalid");
-        }
-
-        stUpdateCameraNameReq stReq;
-        stUpdateCameraNameRep stRep;
-        snprintf(stReq.name, ZWSYSTEM_IPC_STRING_SIZE, "%s", name.c_str());
-        int rc = zwsystem_ipc_updateCameraName(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功更新攝影機名稱");
-        AddString(response, PAYLOAD_KEY_NAME, name);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "更新攝影機名稱時發生異常: " << e.what() << std::endl;
-        std::string desc = "更新攝影機名稱時發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-    return "";
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功更新攝影機名稱");
+                AddString(response, PAYLOAD_KEY_NAME, name);
+            }
+        );
 }
 
 // 輔助函數：計算UTF-8字符串中的字符數量
@@ -1260,82 +1129,47 @@ std::pair<std::string, std::string> parseOsdRuleAndGetFormat(const std::string &
 
 std::string ChtP2PCameraControlHandler::handleSetCameraOSD(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理設定攝影機OSD: " << payload << std::endl;
+    return handleWithCommonFlow(self, payload, "處理設定攝影機OSD",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
 
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                const std::string& osdRule = GetStringMember(requestJson, PAYLOAD_KEY_OSD_RULE);
+                std::cout << "解析成功 - osdRule: " << osdRule << std::endl;
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                if (osdRule.size() >= ZWSYSTEM_IPC_STRING_SIZE)
+                {
+                    throw std::runtime_error("OsdRule is too long");
+                }
+                if (!is_valid_utf8(osdRule.c_str(), osdRule.size()))
+                {
+                    throw std::runtime_error("OsdRule string format is invalid");
+                }
 
-        const std::string& osdRule = GetStringMember(requestJson, PAYLOAD_KEY_OSD_RULE);
-        std::cout << "解析成功 - osdRule: " << osdRule << std::endl;
+                stSetCameraOsdReq stReq;
+                stSetCameraOsdRep stRep;
+                snprintf(stReq.osdRule, ZWSYSTEM_IPC_STRING_SIZE, "%s", osdRule.c_str());
+                int rc = zwsystem_ipc_setCameraOsd(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        if (osdRule.size() >= ZWSYSTEM_IPC_STRING_SIZE)
-        {
-            throw std::runtime_error("OsdRule is too long");
-        }
-        if (!is_valid_utf8(osdRule.c_str(), osdRule.size()))
-        {
-            throw std::runtime_error("OsdRule string format is invalid");
-        }
-
-        stSetCameraOsdReq stReq;
-        stSetCameraOsdRep stRep;
-        snprintf(stReq.osdRule, ZWSYSTEM_IPC_STRING_SIZE, "%s", osdRule.c_str());
-        int rc = zwsystem_ipc_setCameraOsd(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定攝影機OSD");
-        AddString(response, PAYLOAD_KEY_OSD_RULE, osdRule);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "設定攝影機OSD時發生錯誤: " << e.what() << std::endl;
-        std::string desc = "設定攝影機OSD時發生錯誤: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-    return "";
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定攝影機OSD");
+                AddString(response, PAYLOAD_KEY_OSD_RULE, osdRule);
+            }
+        );
 }
 
-static bool isValidRequestId(const std::string& requestId)
+static bool isValidRequestId(const std::string& requestId, const std::string& stringType)
 {
-    // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
-    static const std::regex requestIdPattern("^(UDP|Relay)_live_.+_.+$");
+    // 驗證requestId格式: <UDP/Relay>_<live/history/audio>_<userId>_<JWTToken>
+    std::string regex_requestId_string = "^(UDP|Relay)_" + stringType + "_.+_.+$";
+    const std::regex requestIdPattern(regex_requestId_string);
     return std::regex_match(requestId, requestIdPattern);
 }
 
@@ -1370,7 +1204,7 @@ std::string ChtP2PCameraControlHandler::handleSetCameraHD(ChtP2PCameraControlHan
         std::cout << "設定HD - isHd: " << isHd << " ,requestId: " << requestId << std::endl;
 
         // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
-        if (!isValidRequestId(requestId))
+        if (!isValidRequestId(requestId, "live"))
         {
             std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
             throw std::runtime_error("requestId格式錯誤");
@@ -1529,7 +1363,7 @@ std::string ChtP2PCameraControlHandler::handleSetImageQuality(ChtP2PCameraContro
         const std::string& imageQuality = GetStringMember(requestJson, PAYLOAD_KEY_IMAGE_QUALITY);
 
         // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
-        if (!isValidRequestId(requestId))
+        if (!isValidRequestId(requestId, "live"))
         {
             std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
             throw std::runtime_error("requestId格式錯誤");
@@ -3302,20 +3136,22 @@ static bool parseJson2AiSettingStruct(const rapidjson::Value& obj,
     if (!pstAiSetting) return false;
     if (!obj.IsObject()) return false;
 
-    // 告警設定 (Alert)
+    // 靈敏度設定 (Sen) - 轉換為 int
     auto parseAlert = [](const rapidjson::Value& v, bool& out) -> bool {
         if (v.IsBool()) { out = v.GetBool(); return true; }
+
         if (v.IsInt()) {
             int x = v.GetInt();
-            if (x == 0) { out = false; return true; }
-            if (x == 1) { out = true;  return true; }
+            if (x == 0) { out = false;  return true; }
+            if (x == 1) { out = true;   return true; }
             return false;
         }
         if (v.IsString()) {
             const char *s = v.GetString();
             const auto n = v.GetStringLength();
-            if (n == 1 && s[0] == '0') { out = false; return true; }
-            if (n == 1 && s[0] == '1') { out = true;  return true; }
+            if (n == 1 && s[0] == '0') { out = eSenMode_Low;    return true; }
+            if (n == 1 && s[0] == '1') { out = eSenMode_Middle; return true; }
+            if (n == 1 && s[0] == '2') { out = eSenMode_High;   return true; }
             return false;
         }
         return false;
@@ -3587,7 +3423,7 @@ static bool parseAiSettingStruct2Json(rapidjson::Value &outObj,
     outObj.SetObject();
 
     // 告警設定 (Alert)
-    auto addAlert = [&](const char *key, bool val) {
+    auto addAlert = [&outObj, &alloc](const char *key, bool val) {
         outObj.AddMember(
             rapidjson::StringRef(key),
             rapidjson::Value((val)?"1":"0", alloc),
@@ -3607,7 +3443,7 @@ static bool parseAiSettingStruct2Json(rapidjson::Value &outObj,
     addAlert(PAYLOAD_KEY_AD_CAT_ALERT,      pstAiSetting->adCatAlert);
 
     // 靈敏度設定 (Sen) - 轉換為 int
-    auto addSensitivity = [&](const char *key, int val) {
+    auto addSensitivity = [&outObj, &alloc](const char *key, int val) {
         outObj.AddMember(
             rapidjson::StringRef(key),
             val,
@@ -3627,7 +3463,7 @@ static bool parseAiSettingStruct2Json(rapidjson::Value &outObj,
     addSensitivity(PAYLOAD_KEY_AD_CAT_SEN,      pstAiSetting->adCatSen);
 
     // 電子圍籬座標
-    auto addFencePos = [&](const char *key, const std::pair<int, int>& val)
+    auto addFencePos = [&outObj, &alloc](const char *key, const std::pair<int, int>& val)
     {
         rapidjson::Value pos(rapidjson::kObjectType);
         pos.AddMember(PAYLOAD_KEY_X, val.first, alloc);
@@ -3784,6 +3620,671 @@ std::string ChtP2PCameraControlHandler::handleGetCameraAISetting(ChtP2PCameraCon
 
     return "";
 }
+
+static bool parseVideoSourceInfoStruct2Json(rapidjson::Value &outObj,
+        const stVideoSourceInfo *pstVsrcInfo,
+        rapidjson::Document::AllocatorType& alloc)
+{
+    if (!pstVsrcInfo || !pstVsrcInfo->enabled) return false;
+
+    outObj.SetObject();
+    outObj.AddMember(PAYLOAD_KEY_CODEC, pstVsrcInfo->codec, alloc);
+    outObj.AddMember(PAYLOAD_KEY_WIDTH, pstVsrcInfo->width, alloc);
+    outObj.AddMember(PAYLOAD_KEY_HEIGHT, pstVsrcInfo->height, alloc);
+    outObj.AddMember(PAYLOAD_KEY_FPS, pstVsrcInfo->fps, alloc);
+
+    return true;
+}
+
+static bool parseAudioSourceInfoStruct2Json(rapidjson::Value &outObj,
+        const stAudioSourceInfo *pstAsrcInfo,
+        rapidjson::Document::AllocatorType& alloc)
+{
+    if (!pstAsrcInfo || !pstAsrcInfo->enabled) return false;
+
+    outObj.SetObject();
+    outObj.AddMember(PAYLOAD_KEY_CODEC, pstAsrcInfo->codec, alloc);
+    outObj.AddMember(PAYLOAD_KEY_WIDTH, pstAsrcInfo->bitrate, alloc);
+    outObj.AddMember(PAYLOAD_KEY_HEIGHT, pstAsrcInfo->sampleRate, alloc);
+    AddString(outObj, PAYLOAD_KEY_SDP, pstAsrcInfo->sdp, alloc);
+
+    return true;
+}
+
+/**
+ * @brief 處理獲取即時影音串流
+ */
+std::string ChtP2PCameraControlHandler::handleGetVideoLiveStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理獲取即時串流",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+                const std::string& frameType = GetStringMember(requestJson, PAYLOAD_KEY_FRAME_TYPE);
+                const std::string& imageQuality = GetStringMember(requestJson, PAYLOAD_KEY_IMAGE_QUALITY);
+                std::cout << "即時串流請求 - requestId: " << requestId << std::endl;
+                std::cout << "即時串流請求 - frameType: " << frameType << ", imageQuality: " << imageQuality << std::endl;
+
+                // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
+                if (!isValidRequestId(requestId, "live"))
+                {
+                    std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
+                    throw std::runtime_error("requestId格式錯誤");
+                }
+
+                stStartVideoStreamReq stReq;
+                stReq.streamingType = eVideoStreamingType_Live;
+                snprintf(stReq.requestId, ZWSYSTEM_IPC_STRING_SIZE, "%s", requestId.c_str());
+                if (frameType == "rtp") {
+                    stReq.frameType = eStreamFrameType_RTP;
+                } else if (frameType == "raw") {
+                    stReq.frameType = eStreamFrameType_RAW;
+                } else {
+                    throw std::runtime_error("frameType必須為rtp或raw");
+                }
+
+                if (imageQuality == "0") {
+                    stReq.imageQuality = eImageQuality_Low;
+                } else if (imageQuality == "1") {
+                    stReq.imageQuality = eImageQuality_Middle;
+                } else if (imageQuality == "2") {
+                    stReq.imageQuality = eImageQuality_High;
+                } else {
+                    throw std::runtime_error("imageQuality必須為0、1或2");
+                }
+
+                stStartVideoStreamRep stRep;
+                int rc = zwsystem_ipc_startVideoStream(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理獲取即時串流");
+                AddString(response, PAYLOAD_KEY_REQUEST_ID, stRep.requestId);
+                rapidjson::Value vsrcObj, asrcObj;
+                if (parseVideoSourceInfoStruct2Json(vsrcObj, &stRep.vsrcInfo, allocator))
+                {
+                    response.AddMember(PAYLOAD_KEY_VIDEO, vsrcObj.Move(), allocator);
+                }
+                if (parseAudioSourceInfoStruct2Json(asrcObj, &stRep.asrcInfo, allocator))
+                {
+                    response.AddMember(PAYLOAD_KEY_AUDIO, asrcObj.Move(), allocator);
+                }
+            }
+        );
+}
+
+/**
+ * @brief 處理停止即時影音串流
+ */
+std::string ChtP2PCameraControlHandler::handleStopVideoLiveStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理停止串流",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+                std::cout << "停止串流 - requestId: " << requestId << std::endl;
+
+                // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
+                if (!isValidRequestId(requestId, "live"))
+                {
+                    std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
+                    throw std::runtime_error("requestId格式錯誤");
+                }
+
+                stStopVideoStreamReq stReq;
+                snprintf(stReq.requestId, ZWSYSTEM_IPC_STRING_SIZE, "%s", requestId.c_str());
+
+                stStopVideoStreamRep stRep;
+                int rc = zwsystem_ipc_stopVideoStream(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理停止串流");
+                AddString(response, PAYLOAD_KEY_REQUEST_ID, stRep.requestId);
+            }
+        );
+}
+
+/**
+ * @brief 處理獲取歷史影音串流
+ */
+std::string ChtP2PCameraControlHandler::handleGetVideoHistoryStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理獲取歷史串流",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+                const std::string& frameType = GetStringMember(requestJson, PAYLOAD_KEY_FRAME_TYPE);
+                int64_t startTime = GetInt64Member(requestJson, PAYLOAD_KEY_START_TIME);
+
+                std::cout << "即時串流請求 - requestId: " << requestId << std::endl;
+                std::cout << "即時串流請求 - frameType: " << frameType << ", startTime: " << startTime << std::endl;
+
+                // 驗證requestId格式: <UDP/Relay>_history_<userId>_<JWTToken>
+                if (!isValidRequestId(requestId, "history"))
+                {
+                    std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_history_<userId>_<JWTToken>" << std::endl;
+                    throw std::runtime_error("requestId格式錯誤");
+                }
+
+                stStartVideoStreamReq stReq;
+                stReq.streamingType = eVideoStreamingType_History;
+                snprintf(stReq.requestId, ZWSYSTEM_IPC_STRING_SIZE, "%s", requestId.c_str());
+                if (frameType == "rtp") {
+                    stReq.frameType = eStreamFrameType_RTP;
+                } else if (frameType == "raw") {
+                    stReq.frameType = eStreamFrameType_RAW;
+                } else {
+                    throw std::runtime_error("frameType必須為rtp或raw");
+                }
+
+                stReq.startTime = startTime;
+                stStartVideoStreamRep stRep;
+                int rc = zwsystem_ipc_startVideoStream(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理獲取即時串流");
+                AddString(response, PAYLOAD_KEY_REQUEST_ID, stRep.requestId);
+                rapidjson::Value vsrcObj, asrcObj;
+                if (parseVideoSourceInfoStruct2Json(vsrcObj, &stRep.vsrcInfo, allocator))
+                {
+                    response.AddMember(PAYLOAD_KEY_VIDEO, vsrcObj.Move(), allocator);
+                }
+                if (parseAudioSourceInfoStruct2Json(asrcObj, &stRep.asrcInfo, allocator))
+                {
+                    response.AddMember(PAYLOAD_KEY_AUDIO, asrcObj.Move(), allocator);
+                }
+            }
+        );
+}
+
+/**
+ * @brief 處理停止歷史影音串流
+ */
+std::string ChtP2PCameraControlHandler::handleStopVideoHistoryStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理停止串流",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+                std::cout << "停止串流 - requestId: " << requestId << std::endl;
+
+                // 驗證requestId格式: <UDP/Relay>_history_<userId>_<JWTToken>
+                if (!isValidRequestId(requestId, "history"))
+                {
+                    std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_history_<userId>_<JWTToken>" << std::endl;
+                    throw std::runtime_error("requestId格式錯誤");
+                }
+
+                stStopVideoStreamReq stReq;
+                snprintf(stReq.requestId, ZWSYSTEM_IPC_STRING_SIZE, "%s", requestId.c_str());
+
+                stStopVideoStreamRep stRep;
+                int rc = zwsystem_ipc_stopVideoStream(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理停止串流");
+                AddString(response, PAYLOAD_KEY_REQUEST_ID, stRep.requestId);
+            }
+        );
+}
+
+
+/**
+ * @brief 處理發送音頻串流 (雙向語音)
+ */
+std::string ChtP2PCameraControlHandler::handleSendAudioStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理發送音頻串流",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+                int codec = GetIntMember(requestJson, PAYLOAD_KEY_CODE);
+                int bitRate = GetIntMember(requestJson, PAYLOAD_KEY_BIT_RATE);
+                int sampleRate = GetIntMember(requestJson, PAYLOAD_KEY_SAMPLE_RATE);
+                const std::string& sdp = GetStringMember(requestJson, PAYLOAD_KEY_SDP);
+
+                std::cout << "即時串流請求 - requestId: " << requestId << std::endl;
+                std::cout << "即時串流請求 - codec: " << codec
+                                << ", bitRate: " << bitRate
+                                << ", sampleRate: " << sampleRate
+                                << ", sdp: " << sdp
+                                << std::endl;
+
+                // 驗證requestId格式: <UDP/Relay>_audio_<userId>_<JWTToken>
+                if (!isValidRequestId(requestId, "audio"))
+                {
+                    std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_audio_<userId>_<JWTToken>" << std::endl;
+                    throw std::runtime_error("requestId格式錯誤");
+                }
+                if (bitRate < 0) {
+                    throw std::runtime_error("bitRate must be > 0");
+                }
+                if (sampleRate < 0) {
+                    throw std::runtime_error("sampleRate must be > 0");
+                }
+                if (sdp.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
+                    throw std::runtime_error("sdp is too long");
+                }
+
+                stStartAudioStreamReq stReq;
+                snprintf(stReq.requestId, ZWSYSTEM_IPC_STRING_SIZE, "%s", requestId.c_str());
+                if (codec == 11) {
+                    stReq.asrcInfo.codec = eAudioodec_G711;
+                } else if (codec == 12) {
+                    stReq.asrcInfo.codec = eAudioCodec_G729;
+                } else if (codec == 13) {
+                    stReq.asrcInfo.codec = eAudioCodec_AAC;
+                } else {
+                    throw std::runtime_error("audio codec must be 11,12,13");
+                }
+                stReq.asrcInfo.bitrate = bitRate;
+                stReq.asrcInfo.sampleRate = sampleRate;
+                snprintf(stReq.asrcInfo.sdp, ZWSYSTEM_IPC_STRING_SIZE, "%s", (sdp.empty())?"":sdp.c_str());
+
+                stStartAudioStreamRep stRep;
+                int rc = zwsystem_ipc_startAudioStream(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理發送音頻串流");
+                AddString(response, PAYLOAD_KEY_REQUEST_ID, stRep.requestId);
+                rapidjson::Value asrcObj;
+                if (parseAudioSourceInfoStruct2Json(asrcObj, &stRep.asrcInfo, allocator))
+                {
+                    response.AddMember(PAYLOAD_KEY_AUDIO, asrcObj.Move(), allocator);
+                }
+            }
+        );
+}
+
+/**
+ * @brief 處理停止音頻串流
+ */
+std::string ChtP2PCameraControlHandler::handleStopAudioStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    return handleWithCommonFlow(self, payload, "處理停止音頻串流",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+
+                const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
+                int codec = GetIntMember(requestJson, PAYLOAD_KEY_CODE);
+                int bitRate = GetIntMember(requestJson, PAYLOAD_KEY_BIT_RATE);
+                int sampleRate = GetIntMember(requestJson, PAYLOAD_KEY_SAMPLE_RATE);
+                const std::string& sdp = GetStringMember(requestJson, PAYLOAD_KEY_SDP);
+
+                std::cout << "即時串流請求 - requestId: " << requestId << std::endl;
+                std::cout << "即時串流請求 - codec: " << codec
+                                << ", bitRate: " << bitRate
+                                << ", sampleRate: " << sampleRate
+                                << ", sdp: " << sdp
+                                << std::endl;
+
+                // 驗證requestId格式: <UDP/Relay>_audio_<userId>_<JWTToken>
+                if (!isValidRequestId(requestId, "audio"))
+                {
+                    std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_audio_<userId>_<JWTToken>" << std::endl;
+                    throw std::runtime_error("requestId格式錯誤");
+                }
+
+                stStopAudioStreamReq stReq;
+                snprintf(stReq.requestId, ZWSYSTEM_IPC_STRING_SIZE, "%s", requestId.c_str());
+
+                stStopAudioStreamRep stRep;
+                int rc = zwsystem_ipc_stopAudioStream(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
+
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功處理停止音頻串流");
+                AddString(response, PAYLOAD_KEY_REQUEST_ID, stRep.requestId);
+            }
+        );
+}
+
+#if 0 // jeffery added 20250805
+/**
+ * @brief 處理獲取排程影音串流
+ */
+std::string ChtP2PCameraControlHandler::handleGetVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理獲取排程串流: " << payload << std::endl;
+
+    //auto &streamManager = StreamManager::getInstance();
+    //auto &streamManager = StreamManager::getInstance();
+
+    try
+    {
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        std::string camId;
+        std::string requestId;
+        std::string frameType;
+        std::string imageQuality;
+        long startTime;
+
+        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
+        {
+            camId = requestJson["camId"].GetString();
+        }
+
+        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
+        {
+            requestId = requestJson["requestId"].GetString();
+        }
+        else
+        {
+            throw std::runtime_error("缺少必要欄位: requestId");
+        }
+
+        if (requestJson.HasMember("frameType") && requestJson["frameType"].IsString())
+        {
+            frameType = requestJson["frameType"].GetString();
+        }
+        else
+        {
+            throw std::runtime_error("缺少必要欄位: frameType");
+        }
+
+        if (requestJson.HasMember("imageQuality") && requestJson["imageQuality"].IsString())
+        {
+            imageQuality = requestJson["imageQuality"].GetString();
+        }
+        else
+        {
+            throw std::runtime_error("缺少必要欄位: imageQuality");
+        }
+
+        if (requestJson.HasMember("startTime") && (requestJson["startTime"].IsInt64() || requestJson["startTime"].IsString()))
+        {
+            if (requestJson["startTime"].IsString())
+            {
+                startTime = std::stol(requestJson["startTime"].GetString());
+            }
+            else
+            {
+                startTime = requestJson["startTime"].GetInt64();
+            }
+        }
+        else
+        {
+            throw std::runtime_error("缺少必要欄位: startTime");
+        }
+
+        // 取得IP參數（如果沒有提供則使用空字串）
+        std::string IP;
+        if (requestJson.HasMember("IP") && requestJson["IP"].IsString())
+        {
+            IP = requestJson["IP"].GetString();
+        }
+
+        // 驗證requestId格式: <UDP/Relay>_history_<userId>_<JWTToken>
+        /*std::regex requestIdPattern("^(UDP|Relay)_history_.+_.+$");
+        if (!std::regex_match(requestId, requestIdPattern))
+        {
+            std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_history_<userId>_<JWTToken>" << std::endl;
+            throw std::runtime_error("requestId格式錯誤");
+        }*/
+
+        // 驗證frameType參數
+        if (frameType != "rtp" && frameType != "raw")
+        {
+            std::cerr << "不支援的frameType: " << frameType << std::endl;
+            throw std::runtime_error("frameType必須為rtp或raw");
+        }
+
+        // 驗證imageQuality參數
+        if (imageQuality != "0" && imageQuality != "1" && imageQuality != "2")
+        {
+            std::cerr << "不支援的imageQuality: " << imageQuality << std::endl;
+            throw std::runtime_error("imageQuality必須為0、1或2");
+        }
+
+        std::cout << "排程串流請求 - camId: " << camId
+                  << ", requestId: " << requestId
+                  << ", frameType: " << frameType
+                  << ", imageQuality: " << imageQuality
+                  << ", startTime: " << startTime
+                  << ", IP: " << IP << std::endl;
+
+        // 驗證 camId
+        auto &paramsManager = CameraParametersManager::getInstance();
+        if (!camId.empty())
+        {
+            std::string currentCamId = paramsManager.getCameraId();
+            if (camId != currentCamId)
+            {
+                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
+                throw std::runtime_error("攝影機 ID 不符");
+            }
+        }
+#if 0
+#if 0
+        // 設置影音編碼參數 - 根據imageQuality調整
+        VideoCodecParams videoParams;
+        AudioCodecParams audioParams;
+
+        // 從INI檔案讀取串流參數
+        StreamParams streamParams = readStreamParamsFromINI(imageQuality);
+        int width = streamParams.width;
+        int height = streamParams.height;
+        int fps = streamParams.fps;
+        int bitrate = streamParams.bitrate;
+
+        videoParams.codec = 2; // H.264
+
+        audioParams.codec = 13;     // G.711
+        audioParams.bitRate = 64;   // 64 kbps
+        audioParams.sampleRate = 8; // 8 kHz
+
+        // 啟動排程串流
+        bool startResult = streamManager.startScheduleVideoStream(requestId, startTime,
+                                                                  videoParams, audioParams, IP);
+        if (!startResult)
+        {
+            throw std::runtime_error("啟動排程串流失敗");
+        }
+#endif
+#endif
+        // 構建成功回應
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+#if 0
+#if 0
+        // 影像編碼資訊
+        rapidjson::Value video(rapidjson::kObjectType);
+        rapidjson::Value video(rapidjson::kObjectType);
+        video.AddMember(PAYLOAD_KEY_CODEC, videoParams.codec, allocator);
+        video.AddMember(PAYLOAD_KEY_WIDTH, videoParams.width, allocator);
+        video.AddMember(PAYLOAD_KEY_HEIGHT, videoParams.height, allocator);
+        video.AddMember(PAYLOAD_KEY_FPS, videoParams.fps, allocator);
+        response.AddMember(PAYLOAD_KEY_VIDEO, video, allocator);
+
+        // 音頻編碼資訊 (可選)
+        rapidjson::Value audio(rapidjson::kObjectType);
+        rapidjson::Value audio(rapidjson::kObjectType);
+        audio.AddMember(PAYLOAD_KEY_CODEC, audioParams.codec, allocator);
+        audio.AddMember(PAYLOAD_KEY_BIT_RATE, audioParams.bitRate, allocator);
+        audio.AddMember(PAYLOAD_KEY_SAMPLE_RATE, audioParams.sampleRate, allocator);
+        response.AddMember(PAYLOAD_KEY_AUDIO, audio, allocator);
+#endif
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+#endif
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+
+        std::cout << "排程串流已啟動，requestId: " << requestId
+                  << ", frameType: " << frameType
+                  << ", imageQuality: " << imageQuality
+                  << ", startTime: " << startTime << std::endl;
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "處理排程串流請求時發生異常: " << e.what() << std::endl;
+
+        rapidjson::Document errorResponse;
+        errorResponse.SetObject();
+        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
+        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        errorResponse.Accept(writer);
+        return buffer.GetString();
+    }
+}
+
+/**
+ * @brief 處理停止排程影音串流
+ */
+std::string ChtP2PCameraControlHandler::handleStopVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload)
+{
+    std::cout << "處理停止排程串流: " << payload << std::endl;
+
+    //auto &streamManager = StreamManager::getInstance();
+    //auto &streamManager = StreamManager::getInstance();
+
+    try
+    {
+        rapidjson::Document requestJson;
+        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
+        if (parseResult.IsError())
+        {
+            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
+            throw std::runtime_error("JSON 格式錯誤");
+        }
+
+        std::string camId;
+        std::string requestId;
+
+        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
+        {
+            camId = requestJson["camId"].GetString();
+        }
+
+        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
+        {
+            requestId = requestJson["requestId"].GetString();
+
+            // 驗證 requestId 格式：<UDP/Relay>_history_<UserID>_<JWTToken>
+            std::cout << "停止排程串流 requestId 格式: <UDP/Relay>_history_<UserID>_<JWTToken>" << std::endl;
+            std::cout << "收到的 requestId: " << requestId << std::endl;
+        }
+        else
+        {
+            throw std::runtime_error("缺少必要欄位: requestId");
+        }
+
+        std::cout << "停止排程串流 - camId: " << camId << ", requestId: " << requestId << std::endl;
+
+        // 驗證 camId
+        auto &paramsManager = CameraParametersManager::getInstance();
+        if (!camId.empty())
+        {
+            std::string currentCamId = paramsManager.getCameraId();
+            if (camId != currentCamId)
+            {
+                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
+                throw std::runtime_error("攝影機 ID 不符");
+            }
+        }
+#if 0
+#if 0
+        // 停止串流管理器中的歷史串流
+        bool stopResult = streamManager.stopScheduleVideoStream(requestId);
+        if (!stopResult)
+        {
+            std::cerr << "停止排程串流失敗 - " << requestId << std::endl;
+            // 繼續執行，不拋出異常
+        }
+#endif
+#endif
+        std::cout << "排程串流已停止" << std::endl;
+
+        rapidjson::Document response;
+        rapidjson::Document response;
+        response.SetObject();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
+        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        response.Accept(writer);
+        return buffer.GetString();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "處理停止歷史串流時發生異常: " << e.what() << std::endl;
+
+        rapidjson::Document errorResponse;
+        errorResponse.SetObject();
+        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
+        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        errorResponse.Accept(writer);
+        return buffer.GetString();
+    }
+}
+#endif
 
 bool ChtP2PCameraControlHandler::verifyExternalEnvironment(const std::string &expectedTzString)
 {
@@ -4732,1076 +5233,5 @@ static bool verifyParameterSetting(const std::string &paramName, const std::stri
     {
         std::cerr << "驗證參數 " << paramName << " 時發生異常: " << e.what() << std::endl;
         return false;
-    }
-}
-
-/**
- * @brief 處理獲取即時影音串流
- */
-std::string ChtP2PCameraControlHandler::handleGetVideoLiveStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理獲取即時串流: " << payload << std::endl;
-    std::cout << "\n===== 處理即時影音串流請求 =====" << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-        std::string frameType;
-        std::string IP;
-        std::string imageQuality;
-
-        // 獲取請求參數
-        if (requestJson.HasMember(PAYLOAD_KEY_CAMID) && requestJson[PAYLOAD_KEY_CAMID].IsString())
-        {
-            camId = requestJson[PAYLOAD_KEY_CAMID].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: " PAYLOAD_KEY_CAMID);
-        }
-
-        if (requestJson.HasMember(PAYLOAD_KEY_REQUEST_ID) && requestJson[PAYLOAD_KEY_REQUEST_ID].IsString())
-        {
-            requestId = requestJson[PAYLOAD_KEY_REQUEST_ID].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: " PAYLOAD_KEY_REQUEST_ID);
-        }
-
-        if (requestJson.HasMember(PAYLOAD_KEY_FRAME_TYPE) && requestJson[PAYLOAD_KEY_FRAME_TYPE].IsString())
-        {
-            frameType = requestJson[PAYLOAD_KEY_FRAME_TYPE].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: " PAYLOAD_KEY_FRAME_TYPE);
-        }
-
-        if (requestJson.HasMember("IP") && requestJson["IP"].IsString())
-        {
-            IP = requestJson["IP"].GetString();
-        }
-
-        if (requestJson.HasMember(PAYLOAD_KEY_IMAGE_QUALITY) && requestJson[PAYLOAD_KEY_IMAGE_QUALITY].IsString())
-        {
-            imageQuality = requestJson[PAYLOAD_KEY_IMAGE_QUALITY].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: " PAYLOAD_KEY_IMAGE_QUALITY);
-        }
-
-        // 驗證requestId格式: <UDP/Relay>_live_<userId>_<JWTToken>
-        std::regex requestIdPattern("^(UDP|Relay)_live_.+_.+$");
-        if (!std::regex_match(requestId, requestIdPattern))
-        {
-            std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_live_<userId>_<JWTToken>" << std::endl;
-            throw std::runtime_error("requestId格式錯誤");
-        }
-
-        // 驗證frameType參數
-        if (frameType != "rtp" && frameType != "raw")
-        {
-            std::cerr << "不支援的frameType: " << frameType << std::endl;
-            throw std::runtime_error("frameType必須為rtp或raw");
-        }
-
-        // 驗證imageQuality參數
-        if (imageQuality != "0" && imageQuality != "1" && imageQuality != "2")
-        {
-            std::cerr << "不支援的imageQuality: " << imageQuality << std::endl;
-            throw std::runtime_error("imageQuality必須為0、1或2");
-        }
-
-        std::cout << "即時串流請求 - camId: " << camId << ", requestId: " << requestId << std::endl;
-        std::cout << "即時串流請求 - frameType: " << frameType << ", imageQuality: " << imageQuality << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-#if 0
-#if 0
-        // 根據imageQuality設置影音編碼參數
-        VideoCodecParams videoParams;
-        videoParams.codec = 2; // H.264
-
-        // 從INI檔案讀取串流參數
-        StreamParams streamParams = readStreamParamsFromINI(imageQuality);
-        int width = streamParams.width;
-        int height = streamParams.height;
-        int fps = streamParams.fps;
-        int bitrate = streamParams.bitrate;
-
-        videoParams.width = width;
-        videoParams.height = height;
-        videoParams.fps = fps;
-        // videoParams.bitrate = bitrate;
-
-        AudioCodecParams audioParams;
-        audioParams.codec = 13;     // G.711
-        audioParams.bitRate = 64;   // 64 kbps
-        audioParams.sampleRate = 8; // 8 kHz
-
-
-
-        // 啟動串流
-        bool startResult = streamManager.startLiveVideoStream(requestId, videoParams, audioParams, IP);
-        if (!startResult)
-        {
-            throw std::runtime_error("啟動即時串流失敗");
-        }
-#endif
-#endif
-
-        // 構建成功回應 - 包含影音編碼資訊
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-#if 0
-#if 0
-        // 影像編碼資訊
-        rapidjson::Value video(rapidjson::kObjectType);
-        rapidjson::Value video(rapidjson::kObjectType);
-        video.AddMember(PAYLOAD_KEY_VIDEO, videoParams.codec, allocator);
-        video.AddMember(PAYLOAD_KEY_WIDTH, videoParams.width, allocator);
-        video.AddMember(PAYLOAD_KEY_HEIGHT, videoParams.height, allocator);
-        video.AddMember(PAYLOAD_KEY_FPS, videoParams.fps, allocator);
-        response.AddMember(PAYLOAD_KEY_VIDEO, video, allocator);
-
-        // 音頻編碼資訊
-        rapidjson::Value audio(rapidjson::kObjectType);
-        rapidjson::Value audio(rapidjson::kObjectType);
-        audio.AddMember(PAYLOAD_KEY_AUDIO, audioParams.codec, allocator);
-        audio.AddMember(PAYLOAD_KEY_BIT_RATE, audioParams.bitRate, allocator);
-        audio.AddMember(PAYLOAD_KEY_SAMPLE_RATE, audioParams.sampleRate, allocator);
-        response.AddMember(PAYLOAD_KEY_AUDIO, audio, allocator);
-#endif
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-#endif
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        //std::cout << "即時串流已啟動，requestId: " << requestId << std::endl;
-        //std::cout << "影像設定: " << width << "x" << height << " @" << fps << "fps, " << bitrate << "bps" << std::endl;
-        //std::cout << "即時串流已啟動，requestId: " << requestId << std::endl;
-        //std::cout << "影像設定: " << width << "x" << height << " @" << fps << "fps, " << bitrate << "bps" << std::endl;
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理即時串流請求時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-/**
- * @brief 處理停止即時影音串流
- */
-std::string ChtP2PCameraControlHandler::handleStopVideoLiveStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理停止即時串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-
-        if (requestJson.HasMember(PAYLOAD_KEY_CAMID) && requestJson[PAYLOAD_KEY_CAMID].IsString())
-        {
-            camId = requestJson[PAYLOAD_KEY_CAMID].GetString();
-        }
-
-        if (requestJson.HasMember(PAYLOAD_KEY_REQUEST_ID) && requestJson[PAYLOAD_KEY_REQUEST_ID].IsString())
-        {
-            requestId = requestJson[PAYLOAD_KEY_REQUEST_ID].GetString();
-
-            // 驗證 requestId 格式：<UDP/Relay>_live_<UserID>_<JWTToken>
-            std::cout << "停止live串流 requestId 格式: <UDP/Relay>_live_<UserID>_<JWTToken>" << std::endl;
-            std::cout << "收到的 requestId: " << requestId << std::endl;
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: requestId");
-        }
-
-        std::cout << "停止即時串流 - camId: " << camId << ", requestId: " << requestId << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-#if 0
-#if 0
-        // 停止串流管理器中的串流
-        bool stopResult = streamManager.stopLiveVideoStream(requestId);
-        if (!stopResult)
-        {
-            std::cerr << "停止即時串流失敗 - " << requestId << std::endl;
-            // 繼續執行，不拋出異常
-        }
-#endif
-#endif
-        std::cout << "即時串流已停止" << std::endl;
-
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理停止即時串流時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-/**
- * @brief 處理獲取歷史影音串流
- */
-std::string ChtP2PCameraControlHandler::handleGetVideoHistoryStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理獲取歷史串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-        std::string frameType;
-        std::string imageQuality;
-        std::string IP;
-        long startTime;
-
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
-        {
-            requestId = requestJson["requestId"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: requestId");
-        }
-
-        if (requestJson.HasMember("frameType") && requestJson["frameType"].IsString())
-        {
-            frameType = requestJson["frameType"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: frameType");
-        }
-
-        if (requestJson.HasMember("imageQuality") && requestJson["imageQuality"].IsString())
-        {
-            imageQuality = requestJson["imageQuality"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: imageQuality");
-        }
-
-        if (requestJson.HasMember("IP") && requestJson["IP"].IsString())
-        {
-            IP = requestJson["IP"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: IP");
-        }
-
-        if (requestJson.HasMember("startTime") && (requestJson["startTime"].IsInt64() || requestJson["startTime"].IsString()))
-        {
-            if (requestJson["startTime"].IsString())
-            {
-                startTime = std::stol(requestJson["startTime"].GetString());
-            }
-            else
-            {
-                startTime = requestJson["startTime"].GetInt64();
-            }
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: startTime");
-        }
-
-        // 驗證requestId格式: <UDP/Relay>_history_<userId>_<JWTToken>
-        std::regex requestIdPattern("^(UDP|Relay)_history_.+_.+$");
-        if (!std::regex_match(requestId, requestIdPattern))
-        {
-            // std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_history_<userId>_<JWTToken>" << std::endl;
-            // throw std::runtime_error("requestId格式錯誤");
-        }
-
-        // 驗證frameType參數
-        if (frameType != "rtp" && frameType != "raw")
-        {
-            std::cerr << "不支援的frameType: " << frameType << std::endl;
-            throw std::runtime_error("frameType必須為rtp或raw");
-        }
-
-        // 驗證imageQuality參數
-        if (imageQuality != "0" && imageQuality != "1" && imageQuality != "2")
-        {
-            std::cerr << "不支援的imageQuality: " << imageQuality << std::endl;
-            throw std::runtime_error("imageQuality必須為0、1或2");
-        }
-
-        std::cout << "歷史串流請求 - camId: " << camId
-                  << ", requestId: " << requestId
-                  << ", frameType: " << frameType
-                  << ", imageQuality: " << imageQuality
-                  << ", startTime: " << startTime << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-#if 0
-#if 0
-        // 設置影音編碼參數 - 根據imageQuality調整
-        VideoCodecParams videoParams;
-        AudioCodecParams audioParams;
-
-        // 從INI檔案讀取串流參數
-        StreamParams streamParams = readStreamParamsFromINI(imageQuality);
-        int width = streamParams.width;
-        int height = streamParams.height;
-        int fps = streamParams.fps;
-        int bitrate = streamParams.bitrate;
-
-        videoParams.codec = 2; // H.264
-
-        audioParams.codec = 13;     // G.711:
-        audioParams.bitRate = 64;   // 64 kbps
-        audioParams.sampleRate = 8; // 8 kHz
-
-        // 啟動歷史串流
-        bool startResult = streamManager.startHistoryVideoStream(requestId, startTime,
-                                                                 videoParams, audioParams, IP);
-        if (!startResult)
-        {
-            throw std::runtime_error("啟動歷史串流失敗");
-        }
-#endif
-#endif
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-#if 0
-#if 0
-        // 影像編碼資訊
-        rapidjson::Value video(rapidjson::kObjectType);
-        rapidjson::Value video(rapidjson::kObjectType);
-        video.AddMember("codec", videoParams.codec, allocator);
-        video.AddMember("width", videoParams.width, allocator);
-        video.AddMember("height", videoParams.height, allocator);
-        video.AddMember("fps", videoParams.fps, allocator);
-        response.AddMember("video", video, allocator);
-
-        // 音頻編碼資訊 (可選)
-        rapidjson::Value audio(rapidjson::kObjectType);
-        rapidjson::Value audio(rapidjson::kObjectType);
-        audio.AddMember("codec", audioParams.codec, allocator);
-        audio.AddMember("bitRate", audioParams.bitRate, allocator);
-        audio.AddMember("sampleRate", audioParams.sampleRate, allocator);
-        response.AddMember("audio", audio, allocator);
-#endif
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-#endif
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::cout << "歷史串流已啟動，requestId: " << requestId
-                  << ", frameType: " << frameType
-                  << ", imageQuality: " << imageQuality
-                  << ", startTime: " << startTime << std::endl;
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理歷史串流請求時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-/**
- * @brief 處理停止歷史影音串流
- */
-std::string ChtP2PCameraControlHandler::handleStopVideoHistoryStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理停止歷史串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
-        {
-            requestId = requestJson["requestId"].GetString();
-
-            // 驗證 requestId 格式：<UDP/Relay>_history_<UserID>_<JWTToken>
-            std::cout << "停止歷史串流 requestId 格式: <UDP/Relay>_history_<UserID>_<JWTToken>" << std::endl;
-            std::cout << "收到的 requestId: " << requestId << std::endl;
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: requestId");
-        }
-
-        std::cout << "停止歷史串流 - camId: " << camId << ", requestId: " << requestId << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-#if 0
-#if 0
-        // 停止串流管理器中的歷史串流
-        bool stopResult = streamManager.stopHistoryVideoStream(requestId);
-        if (!stopResult)
-        {
-            std::cerr << "停止歷史串流失敗 - " << requestId << std::endl;
-            // 繼續執行，不拋出異常
-        }
-#endif
-#endif
-        std::cout << "歷史串流已停止" << std::endl;
-
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理停止歷史串流時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-#if 1 // jeffery added 20250805
-/**
- * @brief 處理獲取排程影音串流
- */
-std::string ChtP2PCameraControlHandler::handleGetVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理獲取排程串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-        std::string frameType;
-        std::string imageQuality;
-        long startTime;
-
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
-        {
-            requestId = requestJson["requestId"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: requestId");
-        }
-
-        if (requestJson.HasMember("frameType") && requestJson["frameType"].IsString())
-        {
-            frameType = requestJson["frameType"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: frameType");
-        }
-
-        if (requestJson.HasMember("imageQuality") && requestJson["imageQuality"].IsString())
-        {
-            imageQuality = requestJson["imageQuality"].GetString();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: imageQuality");
-        }
-
-        if (requestJson.HasMember("startTime") && (requestJson["startTime"].IsInt64() || requestJson["startTime"].IsString()))
-        {
-            if (requestJson["startTime"].IsString())
-            {
-                startTime = std::stol(requestJson["startTime"].GetString());
-            }
-            else
-            {
-                startTime = requestJson["startTime"].GetInt64();
-            }
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: startTime");
-        }
-
-        // 取得IP參數（如果沒有提供則使用空字串）
-        std::string IP;
-        if (requestJson.HasMember("IP") && requestJson["IP"].IsString())
-        {
-            IP = requestJson["IP"].GetString();
-        }
-
-        // 驗證requestId格式: <UDP/Relay>_history_<userId>_<JWTToken>
-        /*std::regex requestIdPattern("^(UDP|Relay)_history_.+_.+$");
-        if (!std::regex_match(requestId, requestIdPattern))
-        {
-            std::cerr << "requestId格式錯誤，應為: <UDP/Relay>_history_<userId>_<JWTToken>" << std::endl;
-            throw std::runtime_error("requestId格式錯誤");
-        }*/
-
-        // 驗證frameType參數
-        if (frameType != "rtp" && frameType != "raw")
-        {
-            std::cerr << "不支援的frameType: " << frameType << std::endl;
-            throw std::runtime_error("frameType必須為rtp或raw");
-        }
-
-        // 驗證imageQuality參數
-        if (imageQuality != "0" && imageQuality != "1" && imageQuality != "2")
-        {
-            std::cerr << "不支援的imageQuality: " << imageQuality << std::endl;
-            throw std::runtime_error("imageQuality必須為0、1或2");
-        }
-
-        std::cout << "排程串流請求 - camId: " << camId
-                  << ", requestId: " << requestId
-                  << ", frameType: " << frameType
-                  << ", imageQuality: " << imageQuality
-                  << ", startTime: " << startTime
-                  << ", IP: " << IP << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-#if 0
-#if 0
-        // 設置影音編碼參數 - 根據imageQuality調整
-        VideoCodecParams videoParams;
-        AudioCodecParams audioParams;
-
-        // 從INI檔案讀取串流參數
-        StreamParams streamParams = readStreamParamsFromINI(imageQuality);
-        int width = streamParams.width;
-        int height = streamParams.height;
-        int fps = streamParams.fps;
-        int bitrate = streamParams.bitrate;
-
-        videoParams.codec = 2; // H.264
-
-        audioParams.codec = 13;     // G.711
-        audioParams.bitRate = 64;   // 64 kbps
-        audioParams.sampleRate = 8; // 8 kHz
-
-        // 啟動排程串流
-        bool startResult = streamManager.startScheduleVideoStream(requestId, startTime,
-                                                                  videoParams, audioParams, IP);
-        if (!startResult)
-        {
-            throw std::runtime_error("啟動排程串流失敗");
-        }
-#endif
-#endif
-        // 構建成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-#if 0
-#if 0
-        // 影像編碼資訊
-        rapidjson::Value video(rapidjson::kObjectType);
-        rapidjson::Value video(rapidjson::kObjectType);
-        video.AddMember(PAYLOAD_KEY_CODEC, videoParams.codec, allocator);
-        video.AddMember(PAYLOAD_KEY_WIDTH, videoParams.width, allocator);
-        video.AddMember(PAYLOAD_KEY_HEIGHT, videoParams.height, allocator);
-        video.AddMember(PAYLOAD_KEY_FPS, videoParams.fps, allocator);
-        response.AddMember(PAYLOAD_KEY_VIDEO, video, allocator);
-
-        // 音頻編碼資訊 (可選)
-        rapidjson::Value audio(rapidjson::kObjectType);
-        rapidjson::Value audio(rapidjson::kObjectType);
-        audio.AddMember(PAYLOAD_KEY_CODEC, audioParams.codec, allocator);
-        audio.AddMember(PAYLOAD_KEY_BIT_RATE, audioParams.bitRate, allocator);
-        audio.AddMember(PAYLOAD_KEY_SAMPLE_RATE, audioParams.sampleRate, allocator);
-        response.AddMember(PAYLOAD_KEY_AUDIO, audio, allocator);
-#endif
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-#endif
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        std::cout << "排程串流已啟動，requestId: " << requestId
-                  << ", frameType: " << frameType
-                  << ", imageQuality: " << imageQuality
-                  << ", startTime: " << startTime << std::endl;
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理排程串流請求時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-/**
- * @brief 處理停止排程影音串流
- */
-std::string ChtP2PCameraControlHandler::handleStopVideoScheduleStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理停止排程串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        std::string camId;
-        std::string requestId;
-
-        if (requestJson.HasMember("camId") && requestJson["camId"].IsString())
-        {
-            camId = requestJson["camId"].GetString();
-        }
-
-        if (requestJson.HasMember("requestId") && requestJson["requestId"].IsString())
-        {
-            requestId = requestJson["requestId"].GetString();
-
-            // 驗證 requestId 格式：<UDP/Relay>_history_<UserID>_<JWTToken>
-            std::cout << "停止排程串流 requestId 格式: <UDP/Relay>_history_<UserID>_<JWTToken>" << std::endl;
-            std::cout << "收到的 requestId: " << requestId << std::endl;
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: requestId");
-        }
-
-        std::cout << "停止排程串流 - camId: " << camId << ", requestId: " << requestId << std::endl;
-
-        // 驗證 camId
-        auto &paramsManager = CameraParametersManager::getInstance();
-        if (!camId.empty())
-        {
-            std::string currentCamId = paramsManager.getCameraId();
-            if (camId != currentCamId)
-            {
-                std::cerr << "請求的 camId (" << camId << ") 與當前攝影機 ID (" << currentCamId << ") 不符" << std::endl;
-                throw std::runtime_error("攝影機 ID 不符");
-            }
-        }
-#if 0
-#if 0
-        // 停止串流管理器中的歷史串流
-        bool stopResult = streamManager.stopScheduleVideoStream(requestId);
-        if (!stopResult)
-        {
-            std::cerr << "停止排程串流失敗 - " << requestId << std::endl;
-            // 繼續執行，不拋出異常
-        }
-#endif
-#endif
-        std::cout << "排程串流已停止" << std::endl;
-
-        rapidjson::Document response;
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理停止歷史串流時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-#endif
-
-/**
- * @brief 處理發送音頻串流 (雙向語音)
- */
-std::string ChtP2PCameraControlHandler::handleSendAudioStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理發送音頻串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        int codec;
-        int bitRate;
-        int sampleRate;
-
-        // 提取參數
-        if (requestJson.HasMember("codec") && requestJson["codec"].IsInt())
-        {
-            codec = requestJson["codec"].GetInt();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: codec");
-        }
-
-        if (requestJson.HasMember("bitRate") && requestJson["bitRate"].IsInt())
-        {
-            bitRate = requestJson["bitRate"].GetInt();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: bitRate");
-        }
-
-        if (requestJson.HasMember("sampleRate") && requestJson["sampleRate"].IsInt())
-        {
-            sampleRate = requestJson["sampleRate"].GetInt();
-        }
-        else
-        {
-            throw std::runtime_error("缺少必要欄位: sampleRate");
-        }
-
-        std::cout << "雙向語音串流 - codec: " << codec
-                  << ", bitRate: " << bitRate
-                  << ", sampleRate: " << sampleRate << std::endl;
-
-        // 生成requestId（基於時間戳）
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             now.time_since_epoch())
-                             .count();
-        std::string requestId = "audio_" + std::to_string(timestamp);
-#if 0
-#if 0
-        // 設置音頻編碼參數
-        AudioCodecParams audioParams;
-        audioParams.codec = codec;
-        audioParams.bitRate = bitRate;
-        audioParams.sampleRate = sampleRate;
-
-        // 啟動雙向語音串流
-        bool startResult = streamManager.startAudioStream(requestId, audioParams);
-        if (!startResult)
-        {
-            throw std::runtime_error("啟動音頻串流失敗");
-        }
-#endif
-#endif
-        std::cout << "音頻串流已啟動，準備接收語音資料" << std::endl;
-
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("description", rapidjson::Value("準備接收播放語音串流", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理語音串流時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
-    }
-}
-
-/**
- * @brief 處理停止音頻串流
- */
-std::string ChtP2PCameraControlHandler::handleStopAudioStream(ChtP2PCameraControlHandler *self, const std::string &payload)
-{
-    std::cout << "處理停止音頻串流: " << payload << std::endl;
-
-    //auto &streamManager = StreamManager::getInstance();
-    //auto &streamManager = StreamManager::getInstance();
-
-    try
-    {
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
-
-        // 音頻串流通常沒有特定的requestId在停止命令中
-        // 這裡簡化處理：停止所有活躍的音頻串流
-        std::cout << "停止雙向語音串流" << std::endl;
-
-        // 注意：在實際應用中，應該維護一個音頻串流ID的對應
-        // 這裡為了簡化，假設只有一個活躍的音頻串流
-        // 可以通過遍歷 StreamManager 中的會話來找到音頻串流並停止
-
-        // 由於 StreamManager 沒有直接的 "停止所有音頻串流" 方法，
-        // 這裡記錄一個警告，實際應用中需要改進
-        std::cout << "注意：當前實現需要特定的 requestId 來停止音頻串流" << std::endl;
-
-        std::cout << "音頻串流已停止，資源已釋放" << std::endl;
-
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        response.AddMember("description", rapidjson::Value("停止接收播放語音串流", allocator).Move(), allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "處理停止語音串流時發生異常: " << e.what() << std::endl;
-
-        rapidjson::Document errorResponse;
-        errorResponse.SetObject();
-        rapidjson::Document::AllocatorType &allocator = errorResponse.GetAllocator();
-        errorResponse.AddMember(PAYLOAD_KEY_RESULT, 0, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        errorResponse.Accept(writer);
-        return buffer.GetString();
     }
 }

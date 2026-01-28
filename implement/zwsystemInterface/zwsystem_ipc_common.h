@@ -854,12 +854,17 @@ typedef enum stream_frame_type {
     eStreamFrameType_RAW
 } eStreamFrameType;
 
+typedef enum video_streaming_type {
+    eVideoStreamingType_Live = 0,
+    eVideoStreamingType_History
+} eVideoStreamingType;
+
 typedef struct start_video_stream_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
+    eVideoStreamingType streamingType;
     char requestId[ZWSYSTEM_IPC_STRING_SIZE]; // <UDP/Relay>_live_<userId>_<UUID>
     eStreamFrameType frameType;
     eImageQualityMode imageQuality;
-    char startTime[ZWSYSTEM_IPC_STRING_SIZE]; // epoch time?
+    long startTime;
 } stStartVideoStreamReq;
 
 typedef enum video_codec {
@@ -876,53 +881,53 @@ typedef enum audio_codec {
     eAudioCodec_AAC,
 } eAudioCodec;
 
+typedef struct video_source_info_st {
+    bool enabled;
+    eVideoCodec codec;
+    uint32_t width;
+    uint32_t height;
+    uint32_t fps; // 1~30
+} stVideoSourceInfo;
+
+typedef struct audio_source_info_st {
+    bool enabled;
+    eAudioCodec codec;
+    uint32_t bitrate; // kbps
+    uint32_t sampleRate; // kHz
+    char sdp[ZWSYSTEM_IPC_STRING_SIZE];
+} stAudioSourceInfo;
+
 typedef struct start_video_stream_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
     char requestId[ZWSYSTEM_IPC_STRING_SIZE]; // <UDP/Relay>_live_<userId>_<UUID>
-    bool video_enabled;
-    eVideoCodec video_codec;
-    uint32_t video_width;
-    uint32_t video_height;
-    uint32_t video_fps; // 1~30
-    bool audio_enabled;
-    eAudioCodec audio_codec;
-    uint32_t audio_bitrate; // kbps
-    uint32_t audio_sampleRate; // kHz
-    char audio_sdp[ZWSYSTEM_IPC_STRING_SIZE];
+    stVideoSourceInfo vsrcInfo;
+    stAudioSourceInfo asrcInfo;
 } stStartVideoStreamRep;
 
-typedef struct stop_video_live_stream_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
-    char requestId[ZWSYSTEM_IPC_STRING_SIZE]; // <UDP/Relay>_live_<userId>_<UUID>
-} stStopVideoLiveStreamReq;
-
-typedef struct stop_video_live_stream_rep_st {
+typedef struct stop_video_stream_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
     char requestId[ZWSYSTEM_IPC_STRING_SIZE]; // <UDP/Relay>_live_<userId>_<UUID>
-} stStopVideoLiveStreamRep;
+} stStopVideoStream;
+
+typedef stStopVideoStream stStopVideoStreamReq;
+typedef stStopVideoStream stStopVideoStreamRep;
 
 typedef struct start_audio_stream_req_st {
-    char camId[ZWSYSTEM_IPC_STRING_SIZE];
     char requestId[ZWSYSTEM_IPC_STRING_SIZE]; // <UDP/Relay>_live_<userId>_<UUID>
-    eAudioCodec audio_codec;
-    uint32_t audio_bitrate; // kbps
-    uint32_t audio_sampleRate; // kHz
-    char audio_sdp[ZWSYSTEM_IPC_STRING_SIZE];
+    stAudioSourceInfo asrcInfo;
 } stStartAudioStreamReq;
 
 typedef struct start_audio_stream_rep_st {
     int code;
     char description[ZWSYSTEM_IPC_STRING_SIZE];
-    int result;
     char requestId[ZWSYSTEM_IPC_STRING_SIZE]; // <UDP/Relay>_live_<userId>_<UUID>
+    stAudioSourceInfo asrcInfo;
 } stStartAudioStreamRep;
 
-typedef stStartAudioStreamReq stStopAudioStreamReq;
-typedef stStartAudioStreamRep stStopAudioStreamRep;
+typedef stStopVideoStream stStopAudioStreamReq;
+typedef stStopVideoStream stStopAudioStreamRep;
 
 typedef struct get_media_vsrc_req_st {
     char name[ZWSYSTEM_IPC_STRING_SIZE];

@@ -230,7 +230,8 @@ extern "C"
 #define PAYLOAD_KEY_HEIGHT "height" /**int*/          /**影像解析度高pixel*/
 #define PAYLOAD_KEY_FPS "fps" /**int*/                /**1~30*/
 #define PAYLOAD_KEY_BIT_RATE "bitRate" /**int*/       /**單位 kbps*/
-#define PAYLOAD_KEY_SAMPLE_RATE "sampleRate" /**int*/ /**單位 kbps*/
+#define PAYLOAD_KEY_SAMPLE_RATE "sampleRate" /**int*/ /**單位 kHz*/
+#define PAYLOAD_KEY_SDP "sdp" /**string*/
 
 #ifdef __cplusplus
 }
