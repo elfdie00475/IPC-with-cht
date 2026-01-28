@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_subscriber_forward.dir/subscriber_forward.cpp.o -o test_subscriber_forward   -L/home/linliting/study/c_code/IPC-with-cht/out/lib  -Wl,-rpath,/home/linliting/study/c_code/IPC-with-cht/out/lib:/home/linliting/study/c_code/IPC-with-cht/build: ../../libnng_ipc_handler.so -lnng 
