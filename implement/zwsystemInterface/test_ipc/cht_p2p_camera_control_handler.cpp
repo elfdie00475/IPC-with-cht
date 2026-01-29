@@ -1181,6 +1181,7 @@ std::string ChtP2PCameraControlHandler::handleSetCameraHD(ChtP2PCameraControlHan
             {
                 (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
                 auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
                 // 獲取請求參數 - 使用 rapidjson
                 const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
@@ -1266,6 +1267,7 @@ std::string ChtP2PCameraControlHandler::handleSetImageQuality(ChtP2PCameraContro
             {
                 (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
                 auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
                 // 獲取請求參數 - 使用 rapidjson
                 const std::string& requestId = GetStringMember(requestJson, PAYLOAD_KEY_REQUEST_ID);
