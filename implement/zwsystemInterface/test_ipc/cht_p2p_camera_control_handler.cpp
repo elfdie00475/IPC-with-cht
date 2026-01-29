@@ -2679,318 +2679,177 @@ std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlGoPst(ChtP2PCamer
 
 std::string ChtP2PCameraControlHandler::handleHamiCamPtzControlConfigPst(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理PTZ設定預設點: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+    return handleWithCommonFlow(self, payload, "處理PTZ設定預設點",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                // 驗證預設點範圍
+                int index = GetIntMember(requestJson, PAYLOAD_KEY_POSITION_INDEX);
+                const std::string& remove = GetStringMember(requestJson, PAYLOAD_KEY_REMOVE);
+                const std::string& positionName = GetStringMember(requestJson, PAYLOAD_KEY_POSITION_NAME);
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                std::cout << "PTZ設定預設點 - index: " << index << ", remove: " << remove << ", positionName: " << positionName << std::endl;
+                if (index < 1 || index > 4)
+                {
+                    throw std::runtime_error("PTZ預設點必須在1-4之間");
+                }
 
-        // 驗證預設點範圍
-        int index = GetIntMember(requestJson, PAYLOAD_KEY_POSITION_INDEX);
-        const std::string& remove = GetStringMember(requestJson, PAYLOAD_KEY_REMOVE);
-        const std::string& positionName = GetStringMember(requestJson, PAYLOAD_KEY_POSITION_NAME);
+                if (positionName.empty())
+                {
+                    throw std::runtime_error("Preset point name cannot empty!!!");
+                }
+                if (positionName.size() >= ZWSYSTEM_IPC_STRING_SIZE)
+                {
+                    throw std::runtime_error("Preset point name is too long!!!");
+                }
+                if (!is_valid_utf8(positionName.c_str(), positionName.size()))
+                {
+                    throw std::runtime_error("Preset point name string format is invalid");
+                }
 
-        std::cout << "PTZ設定預設點 - index: " << index << ", remove: " << remove << ", positionName: " << positionName << std::endl;
-        if (index < 1 || index > 4)
-        {
-            throw std::runtime_error("PTZ預設點必須在1-4之間");
-        }
+                stPtzSetPresetReq stReq;
+                stReq.index = index;
 
-        if (positionName.empty())
-        {
-            throw std::runtime_error("Preset point name cannot empty!!!");
-        }
-        if (positionName.size() >= ZWSYSTEM_IPC_STRING_SIZE)
-        {
-            throw std::runtime_error("Preset point name is too long!!!");
-        }
-        if (!is_valid_utf8(positionName.c_str(), positionName.size()))
-        {
-            throw std::runtime_error("Preset point name string format is invalid");
-        }
+                if (remove == "0") {
+                    stReq.remove = false;
+                } else if (remove == "1") {
+                    stReq.remove = true;
+                } else {
+                    throw std::runtime_error("PTZ預設點參數remove數值不正確");
+                }
 
-        stPtzSetPresetReq stReq;
-        stReq.index = index;
+                snprintf(stReq.presetName, ZWSYSTEM_IPC_STRING_SIZE, "%s", positionName.c_str());
 
-        if (remove == "0") {
-            stReq.remove = false;
-        } else if (remove == "1") {
-            stReq.remove = true;
-        } else {
-            throw std::runtime_error("PTZ預設點參數remove數值不正確");
-        }
+                stPtzSetPresetRep stRep;
+                int rc = zwsystem_ipc_setPtzPresetPoint(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        snprintf(stReq.presetName, ZWSYSTEM_IPC_STRING_SIZE, "%s", positionName.c_str());
-
-        stPtzSetPresetRep stRep;
-        int rc = zwsystem_ipc_setPtzPresetPoint(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 先回應準備截圖訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ設定預設點");
-        response.AddMember(PAYLOAD_KEY_POSITION_INDEX, index, allocator);
-        AddString(response, PAYLOAD_KEY_REMOVE, remove);
-        AddString(response, PAYLOAD_KEY_POSITION_NAME, positionName);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "PTZ設定預設點發生異常: " << e.what() << std::endl;
-        std::string desc = "PTZ設定預設點發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功PTZ設定預設點");
+                response.AddMember(PAYLOAD_KEY_POSITION_INDEX, index, allocator);
+                AddString(response, PAYLOAD_KEY_REMOVE, remove);
+                AddString(response, PAYLOAD_KEY_POSITION_NAME, positionName);
+            }
+        );
 }
 
 std::string ChtP2PCameraControlHandler::handleHamiCamHumanTracking(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理人體追蹤開關: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+    return handleWithCommonFlow(self, payload, "處理人體追蹤開關",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                int val = GetIntMember(requestJson, PAYLOAD_KEY_VAL);
+                std::cout << "人體追蹤開關 - val: " << val << std::endl;
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                // 驗證開關範圍
+                stPtzSetTrackingReq stReq;
+                if (val == 0) {
+                    stReq.val = ePtzTracking_Off;
+                } else if (val == 1) {
+                    stReq.val = ePtzTracking_GoToHome;
+                } else if (val == 2) {
+                    stReq.val = ePtzTracking_Stay;
+                } else {
+                    throw std::runtime_error("人體追蹤開關必須在0-2之間");
+                }
 
-        int val = GetIntMember(requestJson, PAYLOAD_KEY_VAL);
-        std::cout << "人體追蹤開關 - val: " << val << std::endl;
+                stPtzSetTrackingRep stRep;
+                int rc = zwsystem_ipc_setPtzHumanTracking(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        // 驗證開關範圍
-        stPtzSetTrackingReq stReq;
-        if (val == 0) {
-            stReq.val = ePtzTracking_Off;
-        } else if (val == 1) {
-            stReq.val = ePtzTracking_GoToHome;
-        } else if (val == 2) {
-            stReq.val = ePtzTracking_Stay;
-        } else {
-            throw std::runtime_error("人體追蹤開關必須在0-2之間");
-        }
-
-        stPtzSetTrackingRep stRep;
-        int rc = zwsystem_ipc_setPtzHumanTracking(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 先回應準備截圖訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定人體追蹤開關");
-        response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "設定人體追蹤開關發生異常: " << e.what() << std::endl;
-        std::string desc = "設定人體追蹤開關發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定人體追蹤開關");
+                response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
+            }
+        );
 }
 
 std::string ChtP2PCameraControlHandler::handleHamiCamPetTracking(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理寵物追蹤開關: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+    return handleWithCommonFlow(self, payload, "處理寵物追蹤開關",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                int val = GetIntMember(requestJson, PAYLOAD_KEY_VAL);
+                std::cout << "寵物追蹤開關 - val: " << val << std::endl;
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                // 驗證開關範圍
+                stPtzSetTrackingReq stReq;
+                if (val == 0) {
+                    stReq.val = ePtzTracking_Off;
+                } else if (val == 1) {
+                    stReq.val = ePtzTracking_GoToHome;
+                } else if (val == 2) {
+                    stReq.val = ePtzTracking_Stay;
+                } else {
+                    throw std::runtime_error("寵物追蹤開關必須在0-2之間");
+                }
 
-        int val = GetIntMember(requestJson, PAYLOAD_KEY_VAL);
-        std::cout << "寵物追蹤開關 - val: " << val << std::endl;
+                stPtzSetTrackingRep stRep;
+                int rc = zwsystem_ipc_setPtzPetTracking(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        // 驗證開關範圍
-        stPtzSetTrackingReq stReq;
-        if (val == 0) {
-            stReq.val = ePtzTracking_Off;
-        } else if (val == 1) {
-            stReq.val = ePtzTracking_GoToHome;
-        } else if (val == 2) {
-            stReq.val = ePtzTracking_Stay;
-        } else {
-            throw std::runtime_error("寵物追蹤開關必須在0-2之間");
-        }
-
-        stPtzSetTrackingRep stRep;
-        int rc = zwsystem_ipc_setPtzPetTracking(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 先回應準備截圖訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定寵物追蹤開關");
-        response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "設定寵物追蹤開關發生異常: " << e.what() << std::endl;
-        std::string desc = "設定寵物追蹤開關發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功設定寵物追蹤開關");
+                response.AddMember(PAYLOAD_KEY_VAL, val, allocator);
+            }
+        );
 }
 
 
 std::string ChtP2PCameraControlHandler::handleGetHamiCamBindList(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理獲取綁定清單: " << payload << std::endl;
+    return handleWithCommonFlow(self, payload, "處理獲取綁定清單",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+                stGetCameraBindWifiInfoReq stReq;
+                stGetCameraBindWifiInfoRep stRep;
+                int rc = zwsystem_ipc_getCameraBindWifiInfo(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                const std::string& wifiSsid(stRep.wifiSsid);
+                const std::string& wifiPassword(stRep.password); //base64
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
-
-        stGetCameraBindWifiInfoReq stReq;
-        stGetCameraBindWifiInfoRep stRep;
-        int rc = zwsystem_ipc_getCameraBindWifiInfo(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        const std::string& wifiSsid(stRep.wifiSsid);
-        const std::string& wifiPassword(stRep.password); //base64
-
-        // 先回應準備截圖訊息
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功取得WiFi資訊");
-        AddString(response, PAYLOAD_KEY_WIFI_SSID, wifiSsid);
-        AddString(response, PAYLOAD_KEY_PSWD, wifiPassword);
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "handleGetHamiCamBindList異常: " << e.what() << std::endl;
-        std::string desc = "handleGetHamiCamBindList異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功取得WiFi資訊");
+                AddString(response, PAYLOAD_KEY_WIFI_SSID, wifiSsid);
+                AddString(response, PAYLOAD_KEY_PSWD, wifiPassword);
+            }
+        );
 }
 
 // 檢查韌體檔案是否有效
@@ -3040,93 +2899,57 @@ bool validateFirmwareFile(const std::string &filePath)
 
 std::string ChtP2PCameraControlHandler::handleUpgradeHamiCamOTA(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理OTA升級: " << payload << std::endl;
+    return handleWithCommonFlow(self, payload, "處理OTA升級",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-    try
-    {
-        // 步驟 1: 解析輸入的 JSON payload
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+                // 步驟 2: 驗證必要欄位
+                const std::string& upgradeMode = GetStringMember(requestJson, PAYLOAD_KEY_UPGRADE_MODE);
+                const std::string& filePath = GetStringMember(requestJson, PAYLOAD_KEY_FILE_PATH);
+                std::cout << "INFO: 更新模式: " << upgradeMode << std::endl;
+                std::cout << "INFO: 韌體檔案路徑: " << filePath << std::endl;
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                // 步驟 4: 驗證韌體檔案
+                if (filePath.empty()) {
+                    throw std::runtime_error("filePath 參數不能為空");
+                }
+                if (filePath.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
+                    throw std::runtime_error("filePath is too long");
+                }
+                if (!validateFirmwareFile(filePath))
+                {
+                    throw std::runtime_error("filePath 韌體檔案驗證失敗");
+                }
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                // 步驟 6: 準備 OTA 更新
+                std::cout << "INFO: 準備執行 OTA 更新..." << std::endl;
+                stUpgradeCameraOtaReq stReq;
 
-        // 步驟 2: 驗證必要欄位
-        const std::string& upgradeMode = GetStringMember(requestJson, PAYLOAD_KEY_UPGRADE_MODE);
-        const std::string& filePath = GetStringMember(requestJson, PAYLOAD_KEY_FILE_PATH);
-        std::cout << "INFO: 更新模式: " << upgradeMode << std::endl;
-        std::cout << "INFO: 韌體檔案路徑: " << filePath << std::endl;
+                if (upgradeMode == "0") {
+                    stReq.upgradeMode = eUpgradeMode_Immediately;
+                } else if (upgradeMode == "1") {
+                    stReq.upgradeMode = eUpgradeMode_Later;
+                } else {
+                    throw std::runtime_error("upgradeMode 更新模式參數無效");
+                }
 
-        // 步驟 4: 驗證韌體檔案
-        if (filePath.empty()) {
-            throw std::runtime_error("filePath 參數不能為空");
-        }
-        if (filePath.size() >= ZWSYSTEM_IPC_STRING_SIZE) {
-            throw std::runtime_error("filePath is too long");
-        }
-        if (!validateFirmwareFile(filePath))
-        {
-            throw std::runtime_error("filePath 韌體檔案驗證失敗");
-        }
+                snprintf(stReq.filePath, ZWSYSTEM_IPC_STRING_SIZE, "%s", filePath.c_str());
+                stUpgradeCameraOtaRep stRep;
+                int rc = zwsystem_ipc_upgradeCameraOta(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        // 步驟 6: 準備 OTA 更新
-        std::cout << "INFO: 準備執行 OTA 更新..." << std::endl;
-        stUpgradeCameraOtaReq stReq;
-
-        if (upgradeMode == "0") {
-            stReq.upgradeMode = eUpgradeMode_Immediately;
-        } else if (upgradeMode == "1") {
-            stReq.upgradeMode = eUpgradeMode_Later;
-        } else {
-            throw std::runtime_error("upgradeMode 更新模式參數無效");
-        }
-
-        snprintf(stReq.filePath, ZWSYSTEM_IPC_STRING_SIZE, "%s", filePath.c_str());
-        stUpgradeCameraOtaRep stRep;
-        int rc = zwsystem_ipc_upgradeCameraOta(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 步驟 7: 建立成功回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "準備更新OTA");
-
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "handleUpgradeHamiCamOTA異常: " << e.what() << std::endl;
-        std::string desc = "handleUpgradeHamiCamOTA異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "準備更新OTA");
+            }
+        );
 }
 
 static bool parseJson2AiSettingStruct(const rapidjson::Value& obj,
@@ -3348,70 +3171,35 @@ static bool parseJson2AiSettingStruct(const rapidjson::Value& obj,
 
 std::string ChtP2PCameraControlHandler::handleUpdateCameraAISetting(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理更新AI設定: " << payload << std::endl;
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+    return handleWithCommonFlow(self, payload, "處理更新AI設定",
+            [&](rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                const auto& hamiAiSettingsJson = GetObjectMember(requestJson, PAYLOAD_KEY_HAMI_AI_SETTINGS);
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                stCameraAiSettingReq stReq;
 
-        const auto& hamiAiSettingsJson = GetObjectMember(requestJson, PAYLOAD_KEY_HAMI_AI_SETTINGS);
+                if (!parseJson2AiSettingStruct(hamiAiSettingsJson, &stReq.aiSetting, requestJson.GetAllocator()))
+                {
+                    throw std::runtime_error("parse hamiAiSettings error!!!");
+                }
 
-        stCameraAiSettingReq stReq;
+                stCameraAiSettingRep stRep;
+                int rc = zwsystem_ipc_setCameraAiSetting(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        if (!parseJson2AiSettingStruct(hamiAiSettingsJson, &stReq.aiSetting, requestJson.GetAllocator()))
-        {
-            throw std::runtime_error("parse hamiAiSettings error!!!");
-        }
-
-        stCameraAiSettingRep stRep;
-        int rc = zwsystem_ipc_setCameraAiSetting(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 構建回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType& allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功更新AI設定");
-
-        // 序列化回應
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "更新AI設定時發生異常: " << e.what() << std::endl;
-        std::string desc = "更新AI設定時發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功更新AI設定");
+            }
+        );
 }
 
 static bool parseAiSettingStruct2Json(rapidjson::Value &outObj,
@@ -3545,80 +3333,44 @@ static bool parseAiSettingStruct2Json(rapidjson::Value &outObj,
 
 std::string ChtP2PCameraControlHandler::handleGetCameraAISetting(ChtP2PCameraControlHandler *self, const std::string &payload)
 {
-    std::cout << "處理獲取AI設定: " << payload << std::endl;
+    return handleWithCommonFlow(self, payload, "處理獲取AI設定",
+            [&](const rapidjson::Document& requestJson,
+                rapidjson::Document& response)
+            {
+                (void)requestJson; // 如果這個 API 不用 requestJson，可保留避免 unused warning
+                auto& allocator = response.GetAllocator();
+                auto& paramsManager = CameraParametersManager::getInstance();
 
-    try
-    {
-        // 解析請求 JSON
-        rapidjson::Document requestJson;
-        rapidjson::ParseResult parseResult = requestJson.Parse(payload.c_str());
-        if (parseResult.IsError())
-        {
-            std::cerr << "解析請求JSON失敗: " << rapidjson::GetParseError_En(parseResult.Code()) << std::endl;
-            throw std::runtime_error("JSON 格式錯誤");
-        }
+                stCameraAiSettingReq stReq;
+                stCameraAiSettingRep stRep;
+                int rc = zwsystem_ipc_getCameraAiSetting(stReq, &stRep);
+                if (rc < 0 || stRep.code < 0)
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        // 從參數管理器獲取最新參數
-        auto &paramsManager = CameraParametersManager::getInstance();
-        const std::string& saved_camId = paramsManager.getCameraId();
+                const stHamiAiSetting *pstAiSetting = &stRep.aiSetting;
+                if ( (pstAiSetting->updateBit != eAiSettingUpdateMask_ALL) ||
+                    (pstAiSetting->fencePosUpdateBit != eFencePosUpdateMask_ALL) )
+                {
+                    throw std::runtime_error("system service error!!!");
+                }
 
-        std::string errMsg = "";
-        if (!validateCamId(requestJson, saved_camId, errMsg))
-        {
-            throw std::runtime_error(errMsg);
-        }
+                // 構建回應
+                response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
+                AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功獲取AI設定");
 
-        stCameraAiSettingReq stReq;
-        stCameraAiSettingRep stRep;
-        int rc = zwsystem_ipc_getCameraAiSetting(stReq, &stRep);
-        if (rc < 0 || stRep.code < 0)
-        {
-            throw std::runtime_error("system service error!!!");
-        }
+                // 解析已儲存的 AI 設定或建立預設值
+                rapidjson::Value aiSettings(rapidjson::kObjectType);
+                if (!parseAiSettingStruct2Json(aiSettings, pstAiSetting, allocator))
+                {
+                    throw std::runtime_error("Get local AI settings error");
+                }
 
-        const stHamiAiSetting *pstAiSetting = &stRep.aiSetting;
-        if ( (pstAiSetting->updateBit != eAiSettingUpdateMask_ALL) ||
-             (pstAiSetting->fencePosUpdateBit != eFencePosUpdateMask_ALL) )
-        {
-            throw std::runtime_error("system service error!!!");
-        }
-
-        // 構建回應
-        rapidjson::Document response;
-        response.SetObject();
-        rapidjson::Document::AllocatorType &allocator = response.GetAllocator();
-        response.AddMember(PAYLOAD_KEY_RESULT, 1, allocator);
-        AddString(response, PAYLOAD_KEY_DESCRIPTION, "成功獲取AI設定");
-
-        // 解析已儲存的 AI 設定或建立預設值
-        rapidjson::Value aiSettings(rapidjson::kObjectType);
-        if (!parseAiSettingStruct2Json(aiSettings, pstAiSetting, allocator))
-        {
-            throw std::runtime_error("Get local AI settings error");
-        }
-
-        // 將 aiSettingsDoc 加入回應
-        response.AddMember(PAYLOAD_KEY_HAMI_AI_SETTINGS, aiSettings.Move(), allocator);
-
-        // 序列化回應
-        rapidjson::StringBuffer buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-        response.Accept(writer);
-
-        return buffer.GetString();
-    }
-    catch (const std::exception &e)
-    {
-        // 構建失敗回應
-        std::cerr << "獲取AI設定時發生異常: " << e.what() << std::endl;
-        std::string desc = "獲取AI設定時發生異常: " + std::string(e.what());
-        std::string outResult = "";
-        createErrorResponse(desc, outResult);
-
-        return outResult;
-    }
-
-    return "";
+                // 將 aiSettingsDoc 加入回應
+                response.AddMember(PAYLOAD_KEY_HAMI_AI_SETTINGS, aiSettings.Move(), allocator);
+            }
+        );
 }
 
 static bool parseVideoSourceInfoStruct2Json(rapidjson::Value &outObj,

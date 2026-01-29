@@ -63,7 +63,7 @@ static void panic_on_error(int should_panic, const char *format, ...)
 
 static void usage(const char* prog)
 {
-	fprintf(stderr, "Usage: %s <frontend_ipc_name> <backend_ipc_name>\n");
+	fprintf(stderr, "Usage: %s <frontend_ipc_name> <backend_ipc_name>\n", prog);
 }
 
 int main(int argc, char **argv)
