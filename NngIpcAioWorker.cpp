@@ -9,7 +9,7 @@
 
 namespace llt::nngipc {
 
-std::shared_ptr<AioWorker> AioWorker::create(nng_socket sock, TYPE type, 
+std::shared_ptr<AioWorker> AioWorker::create(nng_socket sock, TYPE type,
     OutputCallback cb, void *cb_param)
 {
     if (sock.id == 0) return nullptr;
@@ -28,7 +28,7 @@ std::shared_ptr<AioWorker> AioWorker::create(nng_socket sock, TYPE type,
     return worker;
 }
 
-AioWorker::AioWorker(nng_socket sock, TYPE type, 
+AioWorker::AioWorker(nng_socket sock, TYPE type,
     OutputCallback cb, void *cb_param)
 : m_sock{sock},
   m_cb{cb},
@@ -152,7 +152,6 @@ printf("%s %d state %d\n", __func__, __LINE__, curr_state);
             size_t req_len = nng_msg_len(msg);
             uint8_t *rep_payload = NULL;
             size_t rep_len = 0;
-            bool need_send = false;
 
             if (m_cb) {
                 // pass msg to handle
