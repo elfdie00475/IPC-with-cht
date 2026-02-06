@@ -15,6 +15,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(NNGIPC_DIR_PATH "/tmp/nngipc" CACHE PATH "set ipc folder path")
 set(PREBUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prebuild" CACHE PATH "set prebuild folder path" )
 option(BUILD_EXAMPLES "build examples" OFF)
+option(USE_FORWARDING "Let Pub/Sub to use proxy to send evnet" OFF)
 
 if (INCLUDE_OUTPUT_PATH)
 else ()
@@ -49,27 +50,30 @@ add_library(nngipc_handler SHARED
 )
 target_link_libraries(nngipc_handler nng)
 
-add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
-target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
-
 if (BUILD_EXAMPLES)
 add_subdirectory("demo/pubsub_forwarder")
 add_subdirectory("implement/test_pubsub")
 add_subdirectory("implement/zwsystemInterface")
-endif()
+endif ()
 
 # create common ipc system
 add_subdirectory("implement/zwipcsystem")
+
+if (USE_FORWARDING)
+add_definitions(-DPUBSUB_USE_FORWARDING=1)
+add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
+target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
+
+install(TARGETS nngipc_pubsub_forwarder
+    RUNTIME DESTINATION bin
+)
+endif ()
 
 install(TARGETS nngipc_handler
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
     INCLUDES DESTINATION include
-)
-
-install(TARGETS nngipc_pubsub_forwarder
-    RUNTIME DESTINATION bin
 )
 
 set(OUTPUT_COLLECTION_HEADER
