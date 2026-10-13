@@ -11,6 +11,8 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+option(NNGIPC_DIR_PATH "set ipc folder path" "/tmp/nngipc")
+
 if (INCLUDE_OUTPUT_PATH)
 else ()
 set(INCLUDE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/include CACHE PATH "for install install file path")
@@ -21,20 +23,54 @@ include_directories(${INCLUDE_OUTPUT_PATH})
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/include")
 link_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/lib")
 
-# 添加可執行文件
-add_executable(system_service system_service.cpp)
-target_link_libraries(system_service nng_ipc_handler)
+add_library(nngipc_handler SHARED
+    NngIpcResponseHandler.cpp
+    NngIpcRequestHandler.cpp
+    NngIpcPublishHandler.cpp
+    NngIpcSubscribeHandler.cpp
+    NngIpcAioWorker.cpp
+    utils.cpp
+)
+target_link_libraries(nngipc_handler nng)
 
-add_library(nng_ipc_handler SHARED NngIpcResponseHandler.cpp NngIpcRequestHandler.cpp)
-target_link_libraries(nng_ipc_handler nng)
+add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
+target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
 
-add_library(cht_ipc_client SHARED cht_ipc_client.cpp)
-target_link_libraries(cht_ipc_client nng_ipc_handler)
+add_subdirectory("demo/pubsub_forwarder")
+add_subdirectory("implement/cht_p2pagent")
+add_subdirectory("implement/test_pubsub")
 
-add_executable(cht_p2pagent cht_p2pagent.c)
-target_link_libraries(cht_p2pagent cht_ipc_client)
+install(TARGETS nngipc_handler
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+    INCLUDES DESTINATION include
+)
 
-# 連接庫
-#target_link_libraries(ipc_service ${NANOMSG_LIBRARIES} ${OPENSSL_LIBRARIES})
-#target_link_libraries(ipc_client ${NANOMSG_LIBRARIES} ${OPENSSL_LIBRARIES})
-#target_link_libraries(security ${OPENSSL_LIBRARIES})
+install(TARGETS nngipc_pubsub_forwarder
+    RUNTIME DESTINATION bin
+)
+
+set(OUTPUT_COLLECTION_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/nngipc.h)
+set(OUTPUT_HEADER
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcAioWorker.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcPublishHandler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcRequestHandler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcResponseHandler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcSubscribeHandler.h
+)
+
+install(FILES ${OUTPUT_COLLECTION_HEADER} DESTINATION include)
+install(FILES ${OUTPUT_HEADER} DESTINATION include/nngipc)
+
+if (INCLUDE_OUTPUT_PATH)
+file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}")
+file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}/nngipc")
+configure_file(nngipc.h ${INCLUDE_OUTPUT_PATH}/nngipc.h COPYONLY)
+configure_file(NngIpcAioWorker.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcAioWorker.h COPYONLY)
+configure_file(NngIpcPublishHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcPublishHandler.h COPYONLY)
+configure_file(NngIpcRequestHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcRequestHandler.h COPYONLY)
+configure_file(NngIpcResponseHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcResponseHandler.h COPYONLY)
+configure_file(NngIpcSubscribeHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcSubscribeHandler.h COPYONLY)
+endif ()
+

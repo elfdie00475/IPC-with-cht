@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include "NngIpcRequestHandler.h"
+#include "nngipc.h"
 #include "cht_ipc_client.h"
 
 using namespace llt;
@@ -37,7 +37,7 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
         cht_ipc_msg_init(&pIpcReqMsg, ((cht_ipc_client_getMsgId() << 1) | 0), _GetCamStatusById);
         pIpcReqMsg.stHdr.u32PayloadSize = sizeof(stCamStatusByIdReq);
 
-        std::shared_ptr<nngipc::RequestHandler> rep_handler = 
+        std::shared_ptr<nngipc::RequestHandler> rep_handler =
                         nngipc::RequestHandler::create(CHT_IPC_NAME);
         if (!rep_handler) { rc = -2; break; }
 
@@ -51,7 +51,7 @@ int cht_ipc_getCamStatusById(const stCamStatusByIdReq *pReq, stCamStatusByIdRep 
         size_t recv_size = 0;
         res = rep_handler->recv(&recv, &recv_size);
         // check res and header;
-        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) { 
+        if (!res || !recv || recv_size < sizeof(stChtIpcHdr)) {
             rc = -5; break;
         }
         stChtIpcHdr *pIpcRepHdr = (stChtIpcHdr *)recv;

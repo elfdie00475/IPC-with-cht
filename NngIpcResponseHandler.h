@@ -2,24 +2,17 @@
 #define LLT_NNGIPC_IPCRESPONSEHANDLER_H
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include <nng/nng.h>
 #include <nng/protocol/reqrep0/rep.h>
 
+#include "NngIpcAioWorker.h"
+
 namespace llt {
 namespace nngipc {
-
-typedef void (*OutputCallback) (const uint8_t *, size_t, uint8_t **, size_t *);
-
-struct Worker {
-    enum { INIT, RECV, SEND, ERROR } state;
-    nng_aio *aio;
-    nng_ctx ctx;
-    OutputCallback cb;
-    bool stopping;
-};
 
 class ResponseHandler
 {
@@ -41,12 +34,15 @@ public:
 private:
     ResponseHandler(const char *ipc_name, uint32_t worker_num, OutputCallback cb);
 
+private:
+    std::mutex m_mutex;
+
     const std::string m_ipcName;
-    uint32_t m_workerNum;
     nng_socket m_sock;
-    OutputCallback m_outputCb;
-    std::vector<Worker *> m_workers;
     bool m_init;
+    uint32_t m_workerNum;
+    OutputCallback m_outputCB;
+    std::vector<std::shared_ptr<AioWorker>> m_workers;
 
 }; // class ResponseHandler
 

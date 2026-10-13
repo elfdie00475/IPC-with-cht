@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "NngIpcResponseHandler.h"
+#include "nngipc.h"
 #include "cht_ipc_client.h"
 
 using namespace llt;
