@@ -80,6 +80,15 @@ bool ResponseHandler::init(void)
         if (worker) m_workers.push_back(worker);
     }
 
+    if (m_workers.size() != m_workerNum) {
+        // A handler without every receive context would accept requests that
+        // can never be processed; fail initialization instead.
+        m_workers.clear();
+        nng_close(m_sock);
+        m_sock = NNG_SOCKET_INITIALIZER;
+        return false;
+    }
+
     m_init = true;
     return true;
 }

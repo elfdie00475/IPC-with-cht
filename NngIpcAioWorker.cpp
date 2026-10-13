@@ -46,16 +46,18 @@ AioWorker::~AioWorker()
 
 static bool worker_free_wrapper(nng_aio **ppAio, nng_ctx *pCtx)
 {
-    if (ppAio) {
+    if (ppAio && *ppAio) {
         nng_aio_free(*ppAio);
         *ppAio = NULL;
     }
 
-    if (pCtx) {
+    if (pCtx && pCtx->id != 0) {
         nng_ctx_close(*pCtx);
     }
 
-    *pCtx = NNG_CTX_INITIALIZER;
+    if (pCtx) {
+        *pCtx = NNG_CTX_INITIALIZER;
+    }
 
     return true;
 }
@@ -65,7 +67,7 @@ bool AioWorker::init(void)
     int rv = 0;
 
     nng_aio *pAio = NULL;
-    nng_ctx ctx;
+    nng_ctx ctx   = NNG_CTX_INITIALIZER;
 
     do {
 
@@ -114,9 +116,9 @@ void AioWorker::process(void)
     }
 
     int rv = nng_aio_result(m_aio);
-    if (rv != 0 || m_stopping) {
+    if (rv != 0 || m_stopping.load()) {
         fprintf(stderr, "%s: %s\n", "process_worker", nng_strerror(rv));
-        if (rv == NNG_ECANCELED || rv == NNG_ECLOSED || m_stopping) {
+        if (rv == NNG_ECANCELED || rv == NNG_ECLOSED || m_stopping.load()) {
             msg = nng_aio_get_msg(m_aio);
             if (msg) nng_msg_free(msg);
 
@@ -148,6 +150,12 @@ printf("%s %d state %d\n", __func__, __LINE__, curr_state);
     case STATE::RECV:
         {
             msg = nng_aio_get_msg(m_aio);
+            if (!msg) {
+                std::lock_guard<std::mutex> lock(m_stateMutex);
+                m_state = STATE::ERROR;
+                nng_sleep_aio(1000, m_aio);
+                break;
+            }
             const uint8_t *req_payload = (const uint8_t *)nng_msg_body(msg);
             size_t req_len = nng_msg_len(msg);
             uint8_t *rep_payload = NULL;
@@ -156,6 +164,17 @@ printf("%s %d state %d\n", __func__, __LINE__, curr_state);
             if (m_cb) {
                 // pass msg to handle
                 m_cb(m_cbParam, req_payload, req_len, &rep_payload, &rep_len);
+            }
+
+            {
+                // stop() may run while the user callback is executing.  Do not
+                // submit another NNG operation after the worker has been stopped.
+                std::lock_guard<std::mutex> lock(m_stateMutex);
+                if (m_stopping) {
+                    if (rep_payload) free(rep_payload);
+                    nng_msg_free(msg);
+                    return;
+                }
             }
 
             nng_msg_clear(msg);
@@ -183,6 +202,7 @@ printf("%s %d state %d\n", __func__, __LINE__, curr_state);
                 }
                 nng_ctx_send(m_ctx, m_aio);
             } else {
+                if (rep_payload) free(rep_payload);
                 rv = 0;
                 {
                     std::lock_guard<std::mutex> lock(m_stateMutex);
@@ -217,7 +237,7 @@ printf("%s %d state %d\n", __func__, __LINE__, curr_state);
 
 void AioWorker::stop(void)
 {
-    m_stopping = true;
+    m_stopping.store(true);
 
     if (m_aio) {
         nng_aio_stop(m_aio);

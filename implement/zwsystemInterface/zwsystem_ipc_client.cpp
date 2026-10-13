@@ -40,7 +40,8 @@ static int ipc_client_executeReqRep(eZwsystemIpcCmd ipc_cmd_id, const ReqType& s
     size_t req_size = sizeof(ReqType);
     size_t rep_size = sizeof(RepType);
 
-    zwsystem_ipc_msg_init(&ipcReqMsg, ((ipc_client_getMsgId() << 1) | 0), ipc_cmd_id);
+    const uint16_t request_id = static_cast<uint16_t>((ipc_client_getMsgId() << 1) | 0);
+    zwsystem_ipc_msg_init(&ipcReqMsg, request_id, ipc_cmd_id);
     ipcReqMsg.stHdr.u32PayloadSize = req_size;
 
     do {
@@ -71,12 +72,15 @@ static int ipc_client_executeReqRep(eZwsystemIpcCmd ipc_cmd_id, const ReqType& s
         uint32_t u32PayloadSize = pIpcRepHdr->u32PayloadSize;
 
         if (ipc_result != 0 ||
+            pIpcRepHdr->u16Headers[0] != request_id ||
             u16CmdType != ipc_cmd_id ||
-            u32PayloadSize != rep_size) { rc = -6; break; }
+            u32PayloadSize != rep_size ||
+            recv_size < sizeof(stZwsystemIpcHdr) + u32PayloadSize) { rc = -6; break; }
 
         if (pRep) {
-            stZwsystemIpcMsg *pIpcRepMsg = (stZwsystemIpcMsg *)recv;
-            memcpy(pRep, pIpcRepMsg->pu8Payload, rep_size);
+            // NNG transports header and payload as one contiguous wire buffer;
+            // stZwsystemIpcMsg::pu8Payload is not present on the wire.
+            memcpy(pRep, recv + sizeof(stZwsystemIpcHdr), rep_size);
         }
     } while (false);
 
@@ -230,22 +234,22 @@ int zwsystem_ipc_setPtzControlMove(stPtzControlMoveReq stReq, stPtzControlMoveRe
 int zwsystem_ipc_setPtzAbsoluteMove(stPtzMoveReq stReq, stPtzMoveRep *pRep)
 {
     return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
-                _FormatSDCard, stReq, pRep);
+                _PtzAbsoluteMove, stReq, pRep);
 }
 int zwsystem_ipc_setPtzRelativeMove(stPtzMoveReq stReq, stPtzMoveRep *pRep)
 {
     return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
-                _FormatSDCard, stReq, pRep);
+                _PtzRelativeMove, stReq, pRep);
 }
 int zwsystem_ipc_setPtzContinuousMove(stPtzMoveReq stReq, stPtzMoveRep *pRep)
 {
     return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
-                _FormatSDCard, stReq, pRep);
+                _PtzContinuousMove, stReq, pRep);
 }
 int zwsystem_ipc_gotoPtzHome(stPtzMoveReq stReq, stPtzMoveRep *pRep)
 {
     return ipc_client_executeReqRep<stPtzMoveReq, stPtzMoveRep>(
-                _FormatSDCard, stReq, pRep);
+                _GotoPtzHome, stReq, pRep);
 }
 
 int zwsystem_ipc_setPtzSpeed(stSetPtzSpeedReq stReq, stSetPtzSpeedRep *pRep)
@@ -293,7 +297,7 @@ int zwsystem_ipc_setPtzPetTracking(stPtzSetTrackingReq stReq, stPtzSetTrackingRe
 int zwsystem_ipc_setPtzHome(stSetPtzHomeReq stReq, stSetPtzHomeRep *pRep)
 {
     return ipc_client_executeReqRep<stSetPtzHomeReq, stSetPtzHomeRep>(
-                _FormatSDCard, stReq, pRep);
+                _SetPtzHome, stReq, pRep);
 }
 
 int zwsystem_ipc_getCameraBindWifiInfo(stGetCameraBindWifiInfoReq stReq, stGetCameraBindWifiInfoRep *pRep)

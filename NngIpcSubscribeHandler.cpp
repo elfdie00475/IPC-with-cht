@@ -81,6 +81,14 @@ bool SubscribeHandler::init(void)
         if (worker) m_workers.push_back(worker);
     }
 
+    if (m_workers.size() != m_workerNum) {
+        // subscribe() indexes m_workers, so a partial worker pool is unsafe.
+        m_workers.clear();
+        nng_close(m_sock);
+        m_sock = NNG_SOCKET_INITIALIZER;
+        return false;
+    }
+
     m_init = true;
     return true;
 }

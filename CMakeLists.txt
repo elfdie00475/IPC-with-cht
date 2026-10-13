@@ -49,6 +49,9 @@ add_library(nngipc_handler SHARED
     NngIpcSubscribeHandler_C.cpp
 )
 target_link_libraries(nngipc_handler nng)
+# Keep installed headers consumable by C++11 callers while allowing the
+# handler implementation to use C++17 internally.
+target_compile_features(nngipc_handler PRIVATE cxx_std_17)
 
 if (BUILD_EXAMPLES)
 add_subdirectory("demo/pubsub_forwarder")

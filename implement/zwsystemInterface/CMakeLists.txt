@@ -24,6 +24,9 @@ set(CLIENT_HEADERS
 
 add_library(zwsystem_ipc_client SHARED ${CLIENT_SOURCES})
 target_link_libraries(zwsystem_ipc_client PUBLIC nngipc_handler)
+# The exported client header remains C++11-compatible; only this library's
+# implementation is compiled as C++17.
+target_compile_features(zwsystem_ipc_client PRIVATE cxx_std_17)
 
 # client teset bin
 add_executable(zwsystem_ipc_client_test zwsystem_ipc_client_test.cpp)
@@ -41,6 +44,7 @@ set(SERVER_HEADERS
 # service bin
 add_executable(zwsystem_ipc_service ${SERVER_SOURCES})
 target_link_libraries(zwsystem_ipc_service PRIVATE nngipc_handler)
+target_compile_features(zwsystem_ipc_service PRIVATE cxx_std_17)
 
 install(TARGETS zwsystem_ipc_service
     RUNTIME DESTINATION bin

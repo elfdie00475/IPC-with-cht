@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <atomic>
 #include <mutex>
 
 #include <nng/nng.h>
@@ -49,13 +50,14 @@ private:
     std::mutex m_stateMutex;
 
     nng_socket m_sock;
-    nng_aio *m_aio;
-    nng_ctx m_ctx;
+    nng_aio *m_aio = nullptr;
+    nng_ctx m_ctx  = NNG_CTX_INITIALIZER;
     OutputCallback m_cb;
     void *m_cbParam;
     STATE m_state;
     TYPE m_type;
-    bool m_stopping;
+    // stop() can run concurrently with the NNG aio callback.
+    std::atomic<bool> m_stopping;
 };
 
 } // namespace nngipc
