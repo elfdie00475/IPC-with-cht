@@ -119,12 +119,14 @@ void AioWorker::process(void)
         fprintf(stderr, "%s: %s\n", "process_worker", nng_strerror(rv));
         if (rv == NNG_ECANCELED || rv == NNG_ECLOSED || m_stopping.load()) {
             msg = nng_aio_get_msg(m_aio);
+            nng_aio_set_msg(m_aio, NULL);
             if (msg) nng_msg_free(msg);
 
             return ;
         } else if (rv != 0) {
             if (curr_state == STATE::SEND) {
                 msg = nng_aio_get_msg(m_aio);
+                nng_aio_set_msg(m_aio, NULL);
                 if (msg) nng_msg_free(msg);
             }
             {
@@ -148,6 +150,9 @@ void AioWorker::process(void)
     case STATE::RECV:
         {
             msg = nng_aio_get_msg(m_aio);
+            // The callback owns the received message until it is either sent
+            // as a response or freed. Do not leave a freed message in the aio.
+            nng_aio_set_msg(m_aio, NULL);
             if (!msg) {
                 std::lock_guard<std::mutex> lock(m_stateMutex);
                 m_state = STATE::ERROR;
@@ -201,7 +206,9 @@ void AioWorker::process(void)
                 nng_ctx_send(m_ctx, m_aio);
             } else {
                 if (rep_payload) free(rep_payload);
-                rv = 0;
+                // Subscribers have no response; each received event must be
+                // released before the next recv overwrites the aio slot.
+                nng_msg_free(msg);
                 {
                     std::lock_guard<std::mutex> lock(m_stateMutex);
                     m_state = STATE::RECV;
