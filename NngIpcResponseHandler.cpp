@@ -127,9 +127,12 @@ bool ResponseHandler::start(void)
 
 bool ResponseHandler::stop(void)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    for (const auto& worker : m_workers) {
+    std::vector<std::shared_ptr<AioWorker>> workers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        workers = m_workers;
+    }
+    for (const auto& worker : workers) {
         worker->stop();
     }
 
@@ -138,14 +141,18 @@ bool ResponseHandler::stop(void)
 
 bool ResponseHandler::release(void)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    m_workers.clear();
-
-    nng_close(m_sock);
-    m_sock = NNG_SOCKET_INITIALIZER;
-
-    m_init = false;
+    std::vector<std::shared_ptr<AioWorker>> workers;
+    nng_socket socket = NNG_SOCKET_INITIALIZER;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        workers = std::move(m_workers);
+        socket = m_sock;
+        m_sock = NNG_SOCKET_INITIALIZER;
+        m_init = false;
+    }
+    // Worker joins and socket shutdown can block; keep them outside m_mutex.
+    workers.clear();
+    if (socket.id != 0) nng_close(socket);
     return true;
 }
 

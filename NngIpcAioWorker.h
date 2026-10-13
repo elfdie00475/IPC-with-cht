@@ -6,6 +6,7 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include <thread>
 
 #include <nng/nng.h>
 #include <nng/protocol/pubsub0/sub.h>
@@ -42,12 +43,12 @@ public:
 private:
     AioWorker(nng_socket sock, TYPE type, OutputCallback cb, void *cb_param);
 
-    static void process_wrapper(void *arg);
-
+    void workerLoop(void);
     void process(void);
 
 private:
     std::mutex m_stateMutex;
+    std::thread m_thread;
 
     nng_socket m_sock;
     nng_aio *m_aio = nullptr;
@@ -56,7 +57,9 @@ private:
     void *m_cbParam;
     STATE m_state;
     TYPE m_type;
-    // stop() can run concurrently with the NNG aio callback.
+    // Callbacks run on our worker, so synchronous forwarded requests and socket
+    // close cannot block NNG's completion threads. A callback must not stop or
+    // release its own worker; the owning process performs lifecycle operations.
     std::atomic<bool> m_stopping;
 };
 

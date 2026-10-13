@@ -71,7 +71,7 @@ bool AioWorker::init(void)
 
     do {
 
-        if ((rv = nng_aio_alloc(&pAio, AioWorker::process_wrapper, this)) != 0) {
+        if ((rv = nng_aio_alloc(&pAio, NULL, NULL)) != 0) {
             fprintf(stderr, "%s: %s\n", "nng_aio_alloc", nng_strerror(rv));
             break;
         }
@@ -94,13 +94,18 @@ bool AioWorker::init(void)
 
 void AioWorker::start(void)
 {
-    process();
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    if (!m_aio || m_stopping || m_thread.joinable()) return;
+    m_thread = std::thread(&AioWorker::workerLoop, this);
 }
 
-void AioWorker::process_wrapper(void *arg)
+void AioWorker::workerLoop(void)
 {
-    auto *self = static_cast<AioWorker *>(arg);
-    self->process();
+    process();
+    while (!m_stopping.load()) {
+        nng_aio_wait(m_aio);
+        process();
+    }
 }
 
 void AioWorker::process(void)
@@ -170,7 +175,7 @@ void AioWorker::process(void)
             }
 
             {
-                // stop() may run while the user callback is executing.  Do not
+                // stop() may run while the user callback is executing. Do not
                 // submit another NNG operation after the worker has been stopped.
                 std::lock_guard<std::mutex> lock(m_stateMutex);
                 if (m_stopping) {
@@ -242,10 +247,23 @@ void AioWorker::process(void)
 
 void AioWorker::stop(void)
 {
-    m_stopping.store(true);
+    std::thread worker;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_stopping.store(true);
+        worker = std::move(m_thread);
+    }
 
     if (m_aio) {
         nng_aio_stop(m_aio);
+        // A canceled recv/send may still own a message. Detach it only after
+        // the application callback has returned and the worker has stopped.
+    }
+    if (worker.joinable()) worker.join();
+    if (m_aio) {
+        nng_msg *msg = nng_aio_get_msg(m_aio);
+        nng_aio_set_msg(m_aio, NULL);
+        if (msg) nng_msg_free(msg);
     }
 }
 
