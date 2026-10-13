@@ -34,6 +34,7 @@ extern "C" {
 #define ZSIPC_TOPIC_STORAGE_PRE_UNMOUNT        "stor.pre_unmount"
 #define ZSIPC_TOPIC_STORAGE_FORMAT_STARTING    "stor.format_starting"
 #define ZSIPC_TOPIC_STORAGE_FORMAT_ENDED       "stor.format_ended"
+#define ZSIPC_TOPIC_STORAGE_NEED_FORMAT        "stor.need_format"
 #define ZSIPC_TOPIC_STORAGE_ERROR              "stor.error"
 
 // struct
@@ -163,6 +164,23 @@ typedef tZSIpcEvtDefault tZSIpcEvtStoragePreUnmount;
 typedef tZSIpcEvtDefault tZSIpcEvtStorageFormatStarting;
 
 typedef tZSIpcEvtDefault tZSIpcEvtStorageFormatEnded;
+
+typedef struct zsipc_event_storage_need_format_t
+{
+    uint32_t u32Idx;
+    char szDeviceName[ZSIPC_NAME_LEN];
+} tZSIpcEvtStorageNeedFormat;
+
+typedef enum zsipc_storage_error_type_e
+{
+    eStorErrorType_Formatting = 0,
+    eStorErrorType_FormatError
+} eZSIpcStorageErrorType;
+
+typedef struct zsipc_event_storage_error_t
+{
+    eZSIpcStorageErrorType eErrorType;
+} tZSIpcEvtStorageError;
 
 #ifdef __cplusplus
 }

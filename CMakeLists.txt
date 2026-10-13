@@ -23,6 +23,21 @@ set(PREBUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prebuild" CACHE PATH "set prebuild
 option(BUILD_EXAMPLES "build examples" OFF)
 option(PUBSUB_USE_FORWARDING "Let Pub/Sub to use proxy to send evnet" OFF)
 
+# Configure the endpoint contract before any example subdirectory is added.
+# The generated header is shared by the handler, forwarder and demo.
+if (PUBSUB_USE_FORWARDING)
+set(NNGIPC_PUBLISH_NAME "pubsub_proxy_front.sock")
+set(NNGIPC_SUBSCRIBE_NAME "pubsub_proxy_back.sock")
+set(NNGIPC_PROXY_MODE 1)
+else()
+set(NNGIPC_PUBLISH_NAME "zwsystem_pubsub.ipc")
+set(NNGIPC_SUBSCRIBE_NAME "zwsystem_pubsub.ipc")
+set(NNGIPC_PROXY_MODE 0)
+endif()
+set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
+set(NNGIPC_PUBSUB_DEFINED_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+configure_file(NngIpcPubsubDefined.h.in "${NNGIPC_PUBSUB_DEFINED_HEADER}" @ONLY)
+
 if (INCLUDE_OUTPUT_PATH)
 else ()
 set(INCLUDE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/include CACHE PATH "for install install file path")
@@ -66,13 +81,6 @@ add_subdirectory("implement/zwsystemInterface")
 endif ()
 
 if (PUBSUB_USE_FORWARDING)
-set(NNGIPC_PUBLISH_NAME "pubsub_proxy_front.sock")
-set(NNGIPC_SUBSCRIBE_NAME "pubsub_proxy_back.sock")
-set(NNGIPC_PROXY_MODE 1)
-
-set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
-configure_file(NngIpcPubsubDefined.h.in "${NNGIPC_PUBSUB_DEFINED_HEADER}" @ONLY)
-
 # forwarding tool
 add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
 target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
@@ -80,13 +88,6 @@ target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
 install(TARGETS nngipc_pubsub_forwarder
     RUNTIME DESTINATION bin
 )
-else()
-set(NNGIPC_PUBLISH_NAME "zwsystem_pubsub.ipc")
-set(NNGIPC_SUBSCRIBE_NAME "zwsystem_pubsub.ipc")
-set(NNGIPC_PROXY_MODE 0)
-
-set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
-configure_file(NngIpcPubsubDefined.h.in "${NNGIPC_PUBSUB_DEFINED_HEADER}" @ONLY)
 endif()
 
 set(OUTPUT_COLLECTION_HEADER

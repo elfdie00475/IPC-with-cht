@@ -69,6 +69,8 @@ bool RequestHandler::init(void)
     std::string url = std::string("ipc://") + ipcDirPath + m_ipcName;
     if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_dial", nng_strerror(rv));
+        nng_close(m_sock);
+        m_sock = NNG_SOCKET_INITIALIZER;
         return false;
     }
 
@@ -134,12 +136,18 @@ bool RequestHandler::recv(uint8_t **payload, size_t *payload_len)
 	}
 
     size_t msglen = nng_msg_len(m_msg);
-    uint8_t *pmsg = (uint8_t *)malloc(msglen);
-    if (pmsg) {
+    uint8_t *pmsg = NULL;
+    if (msglen != 0) {
+        pmsg = (uint8_t *)malloc(msglen);
+        if (!pmsg) {
+            nng_msg_free(m_msg);
+            m_msg = NULL;
+            return false;
+        }
         memcpy(pmsg, nng_msg_body(m_msg), msglen);
-        if (payload) *payload = pmsg;
-        if (payload_len) *payload_len = msglen;
     }
+    if (payload) *payload = pmsg;
+    if (payload_len) *payload_len = msglen;
 
     if (m_msg) {
         nng_msg_free(m_msg);

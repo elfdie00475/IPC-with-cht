@@ -61,5 +61,18 @@ configure_file("zwsystem_ipc_client.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_clien
 configure_file("zwsystem_ipc_common.h" ${INCLUDE_OUTPUT_PATH}/zwsystem_ipc_common.h COPYONLY)
 endif ()
 
-add_subdirectory(simulation_cht_p2p_requester)
+if (NOT IS_DIRECTORY "${CHT_P2P_AGENT_INCLUDE_DIR}")
+    message(FATAL_ERROR
+        "BUILD_TEST requires CHT_P2P_AGENT_INCLUDE_DIR, which contains cht_p2p_agent_c.h")
+endif()
+if (NOT EXISTS "${CHT_P2P_AGENT_LIBRARY}")
+    message(FATAL_ERROR
+        "BUILD_TEST requires CHT_P2P_AGENT_LIBRARY, the formal CHT P2P Agent SDK library")
+endif()
+
+# simulation_cht_p2p_requester 已移除；測試改連結正式 CHT P2P Agent SDK。
+add_library(cht_p2p_requester SHARED IMPORTED GLOBAL)
+set_target_properties(cht_p2p_requester PROPERTIES
+    IMPORTED_LOCATION "${CHT_P2P_AGENT_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${CHT_P2P_AGENT_INCLUDE_DIR}")
 add_subdirectory(test_ipc)

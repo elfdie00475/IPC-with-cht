@@ -11,7 +11,8 @@
 #include <vector>
 #include <memory>
 #include <functional>
-#include <queue>
+#include <atomic>
+#include <deque>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -85,9 +86,9 @@ private:
     bool isEventWorkerStopping(void);
 
 private:
-    bool m_initialized;
+    std::atomic<bool> m_initialized;
 
-    std::queue<SystemEvent> m_eventQueue;
+    std::deque<SystemEvent> m_eventQueue;
     std::mutex m_queueMutex;
     std::condition_variable m_queueCV;
     std::thread m_eventWorkerThread;

@@ -228,3 +228,11 @@ int zsipc_formatPartition(ZSIPC_SDCardCheckerHandle handle,
     return zsipc_executeReqRep<tZSIpcMsgFormatPartitionReq, tZSIpcMsgFormatPartitionRep>(
                 eMsgId_SD_FormatPartition, stReq, pRep);
 }
+
+int zsipc_checkPartitionFormatting(ZSIPC_SDCardCheckerHandle handle,
+        tZSIpcMsgCheckFormattingReq stReq, tZSIpcMsgCheckFormattingRep *pRep)
+{
+    (void)handle;
+    return zsipc_executeReqRep<tZSIpcMsgCheckFormattingReq, tZSIpcMsgCheckFormattingRep>(
+                eMsgId_SD_CheckPartitionFormatting, stReq, pRep);
+}

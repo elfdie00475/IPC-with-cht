@@ -44,7 +44,7 @@
 
 // Each use normalizes NNGIPC_DIR_PATH because external builds can override the
 // generated configuration without preserving its trailing '/'.
-static int normalize_ipc_directory_path(char *path, size_t path_size)
+static int s_normalizeIpcDirPath(char *path, size_t path_size)
 {
     int length = snprintf(path, path_size, "%s", NNGIPC_DIR_PATH);
     if (length <= 0 || (size_t)length >= path_size) {
@@ -81,7 +81,7 @@ static void usage(const char* prog)
 int main(int argc, char **argv)
 {
     char ipc_dir_path[256];
-    if (normalize_ipc_directory_path(ipc_dir_path, sizeof(ipc_dir_path)) != 0) {
+    if (s_normalizeIpcDirPath(ipc_dir_path, sizeof(ipc_dir_path)) != 0) {
         return EXIT_FAILURE;
     }
 
@@ -93,13 +93,19 @@ int main(int argc, char **argv)
     int        ret            = 0;
     int        socket_mode    = 0755; // IPC socket file permissions
 
+    int len = 0;
     char front_end_url[256];
     char back_end_url[256];
-    if (snprintf(front_end_url, sizeof(front_end_url), "ipc://%s%s", ipc_dir_path,
-            NNGIPC_PUBLISH_NAME) >= (int)sizeof(front_end_url) ||
-        snprintf(back_end_url, sizeof(back_end_url), "ipc://%s%s", ipc_dir_path,
-            NNGIPC_SUBSCRIBE_NAME) >= (int)sizeof(back_end_url)) {
-        fprintf(stderr, "NNG IPC endpoint URL is too long\\n");
+    len = snprintf(front_end_url, sizeof(front_end_url),
+            "ipc://%s%s", ipc_dir_path, NNGIPC_PUBLISH_NAME);
+    if (len < 0 || (size_t)len >= sizeof(front_end_url)) {
+        fprintf(stderr, "Create NNG IPC front endpoint URL failed !!!\\n");
+        return EXIT_FAILURE;
+    }
+    len = snprintf(back_end_url, sizeof(back_end_url),
+            "ipc://%s%s", ipc_dir_path, NNGIPC_SUBSCRIBE_NAME) ;
+    if (len < 0 || (size_t)len >= (int)sizeof(back_end_url)) {
+        fprintf(stderr, "Create NNG IPC back endpoint URL failed !!!\\n");
         return EXIT_FAILURE;
     }
     //

@@ -1746,9 +1746,9 @@ bool ChtP2PCameraCommandHandler::sendCommand(CHTP2P_CommandType commandType,
     auto context = std::make_shared<CommandContext>();
     context->done = false;
 
-    // 創建一個有效的指針作為 commandHandle
-    static int dummy_handle;
-    void *commandHandle = &dummy_handle; // 使用靜態變量的地址作為有效的指針
+    // The callback uses this opaque handle as the map key.  A per-request
+    // address prevents concurrent commands from overwriting each other.
+    void *commandHandle = context.get();
 
     // 在發送命令前先存儲上下文
     {
@@ -1770,24 +1770,25 @@ bool ChtP2PCameraCommandHandler::sendCommand(CHTP2P_CommandType commandType,
         return false;
     }
 
-    // 等待命令完成
+    bool timedOut = false;
+    // Do not hold m_mutex while owning context->mutex.  The callback takes
+    // m_mutex first, then context->mutex; reversing that order deadlocks.
     {
         std::unique_lock<std::mutex> lock(context->mutex);
         std::cout << "等待命令完成，commandHandle: " << commandHandle << std::endl;
         if (!context->cv.wait_for(lock, std::chrono::seconds(10), [&context]()
                                   { return context->done; }))
         {
-            // 超時
             std::cerr << "命令執行超時" << std::endl;
-
-            // 移除命令上下文
-            std::unique_lock<std::mutex> globalLock(m_mutex);
-            m_commandContexts.erase(commandHandle);
-
-            return false;
+            timedOut = true;
         }
-        std::cout << "命令已完成！" << std::endl;
     }
+    if (timedOut) {
+        std::unique_lock<std::mutex> globalLock(m_mutex);
+        m_commandContexts.erase(commandHandle);
+        return false;
+    }
+    std::cout << "命令已完成！" << std::endl;
 
     // 命令執行完成，獲取回應
     response = context->response;

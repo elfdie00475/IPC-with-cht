@@ -39,6 +39,8 @@
 #include <nng/protocol/pubsub0/sub.h>
 #include <nng/protocol/pubsub0/pub.h>
 
+#include "NngIpcPubsubDefined.h"
+
 #ifndef NNGIPC_DIR_PATH
 #define NNGIPC_DIR_PATH "/tmp/nngipc/"
 #endif
@@ -105,10 +107,10 @@ main(int argc, char **argv)
 	char front_end_url[256];
 	char back_end_url[256];
 	if (normalize_ipc_directory_path(ipc_dir_path, sizeof(ipc_dir_path)) != 0 ||
-	    snprintf(front_end_url, sizeof(front_end_url), "ipc://%spubsub_proxy_front.sock",
-		    ipc_dir_path) >= (int)sizeof(front_end_url) ||
-	    snprintf(back_end_url, sizeof(back_end_url), "ipc://%spubsub_proxy_back.sock",
-		    ipc_dir_path) >= (int)sizeof(back_end_url)) {
+	    snprintf(front_end_url, sizeof(front_end_url), "ipc://%s%s",
+		    ipc_dir_path, NNGIPC_PUBLISH_NAME) >= (int)sizeof(front_end_url) ||
+	    snprintf(back_end_url, sizeof(back_end_url), "ipc://%s%s",
+		    ipc_dir_path, NNGIPC_SUBSCRIBE_NAME) >= (int)sizeof(back_end_url)) {
 		fprintf(stderr, "Invalid NNG IPC endpoint URL\\n");
 		return EXIT_FAILURE;
 	}

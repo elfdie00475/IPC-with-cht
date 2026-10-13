@@ -35,7 +35,8 @@ int zsipc_getPartitionInfo(ZSIPC_SDCardCheckerHandle handle,
         tZSIpcMsgGetPartitionInfoReq stReq, tZSIpcMsgGetPartitionInfoRep *pRep);
 int zsipc_formatPartition(ZSIPC_SDCardCheckerHandle handle,
         tZSIpcMsgFormatPartitionReq stReq, tZSIpcMsgFormatPartitionRep *pRep);
-
+int zsipc_checkPartitionFormatting(ZSIPC_SDCardCheckerHandle handle,
+        tZSIpcMsgCheckFormattingReq stReq, tZSIpcMsgCheckFormattingRep *pRep);
 
 #ifdef __cplusplus
 }

@@ -99,7 +99,6 @@ void AioWorker::start(void)
 
 void AioWorker::process_wrapper(void *arg)
 {
-    printf("%s %d\n", __func__, __LINE__);
     auto *self = static_cast<AioWorker *>(arg);
     self->process();
 }
@@ -136,7 +135,6 @@ void AioWorker::process(void)
             return ;
         }
     }
-printf("%s %d state %d\n", __func__, __LINE__, curr_state);
     switch (curr_state) {
     case STATE::INIT:
         {

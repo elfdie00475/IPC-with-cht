@@ -89,7 +89,7 @@ bool SubscribeHandler::init(void)
     }
 
     if (m_workers.empty()) {
-        // subscribe() indexes m_workers, so a partial worker pool is unsafe.
+        // 至少需要一個 subscribe worker；部分 worker 建立成功仍可服務。
         m_workers.clear();
         nng_close(m_sock);
         m_sock = NNG_SOCKET_INITIALIZER;

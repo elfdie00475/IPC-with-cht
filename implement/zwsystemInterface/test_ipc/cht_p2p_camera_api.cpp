@@ -5,6 +5,7 @@
  */
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
@@ -99,14 +100,21 @@ static void systemEventCallbackWrapper(void *userParam,
 void ChtP2PCameraAPI::addSystemEvent(eZwsystemSubSystemEventType eventType,
         const uint8_t *data, size_t dataSize, uint64_t nextRetryMs)
 {
+    if (dataSize != 0 && data == nullptr) {
+        printApiDebug("drop system event with null payload");
+        return;
+    }
+
     SystemEvent eventInfo;
     eventInfo.eventType = eventType;
-    eventInfo.data.assign(data, data + dataSize);
+    if (dataSize != 0) {
+        eventInfo.data.assign(data, data + dataSize);
+    }
     eventInfo.nextRetryMs = nextRetryMs;
 
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
-        m_eventQueue.push(eventInfo);
+        m_eventQueue.push_back(std::move(eventInfo));
     }
     m_queueCV.notify_one();
 }
@@ -133,7 +141,7 @@ bool ChtP2PCameraAPI::initialize(void)
     paramsManager.setHiOssStatus(false);
 
     // 配置CHT P2P Agent
-    CHTP2P_Config config;
+    CHTP2P_Config config{};
     config.camId = camId.c_str();
     config.chtBarcode = barcode.c_str();
     config.commandDoneCallback = commandDoneCallbackWrapper;
@@ -154,40 +162,56 @@ bool ChtP2PCameraAPI::initialize(void)
     if (result != 0)
     {
         std::cerr << "Subscribe sytem event failed, error code: " << result << std::endl;
+        chtp2p_deinitialize();
         return false;
     }
 
-    m_eventWorkerStopping = false;
-    m_eventWorkerThread = std::thread(&ChtP2PCameraAPI::eventWorkerThread, this);
-
+    // 訂閱完成後 callback 可能立刻送事件；必須先標示為可處理，再建立 worker。
     m_initialized = true;
+    try {
+        m_eventWorkerStopping = false;
+        m_eventWorkerThread = std::thread(&ChtP2PCameraAPI::eventWorkerThread, this);
+    } catch (const std::system_error& e) {
+        std::cerr << "Create system event worker failed: " << e.what() << std::endl;
+        m_initialized = false;
+        zwsystem_sub_unsubscribeSystemEvent();
+        chtp2p_deinitialize();
+        return false;
+    }
+
     std::cout << "CHT P2P Agent初始化成功" << std::endl;
     return true;
 }
 
 void ChtP2PCameraAPI::deinitialize(void)
 {
-    if (!m_initialized)
+    if (!m_initialized.exchange(false))
     {
         return;
     }
 
+    // Unsubscribe first so no callback can enqueue an event after the worker
+    // has exited and before CHT has been deinitialized.
+    zwsystem_sub_unsubscribeSystemEvent();
+
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_eventWorkerStopping = true;
-        m_queueCV.notify_one();
     }
+    m_queueCV.notify_all();
 
     if (m_eventWorkerThread.joinable()) {
         m_eventWorkerThread.join();
     }
 
-    zwsystem_sub_unsubscribeSystemEvent();
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_eventQueue.clear();
+    }
 
     // 停止CHT P2P Agent
     chtp2p_deinitialize();
 
-    m_initialized = false;
     std::cout << "CHT P2P Agent已停止" << std::endl;
 }
 
@@ -253,22 +277,33 @@ void ChtP2PCameraAPI::eventWorkerThread(void)
 {
     printApiDebug("eventWorkerThread is started");
 
-    while (!isEventWorkerStopping()) {
+    for (;;) {
         std::unique_lock<std::mutex> lock(m_queueMutex);
 
-        // 等待事件，或在 m_workerRunning 變為 false 時醒來
-        m_queueCV.wait(lock, [this] { return !m_eventQueue.empty() || !m_eventWorkerStopping; });
+        m_queueCV.wait(lock, [this] {
+            return m_eventWorkerStopping || !m_eventQueue.empty();
+        });
 
-        if (!m_eventWorkerStopping) {
+        if (m_eventWorkerStopping) {
             break;
         }
 
-        if (m_eventQueue.empty()) {
+        const uint64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto due = std::find_if(m_eventQueue.begin(), m_eventQueue.end(),
+                [nowMs](const SystemEvent& event) { return event.nextRetryMs <= nowMs; });
+        if (due == m_eventQueue.end()) {
+            const auto next = std::min_element(m_eventQueue.begin(), m_eventQueue.end(),
+                    [](const SystemEvent& lhs, const SystemEvent& rhs) {
+                        return lhs.nextRetryMs < rhs.nextRetryMs;
+                    });
+            m_queueCV.wait_for(lock,
+                    std::chrono::milliseconds(next->nextRetryMs - nowMs));
             continue;
         }
 
-        SystemEvent event = m_eventQueue.front();
-        m_eventQueue.pop();
+        SystemEvent event = std::move(*due);
+        m_eventQueue.erase(due);
 
         // update queue in local file
         // remove this event local file
@@ -301,7 +336,7 @@ static int dispatchEvent(ChtP2PCameraCommandHandler& handler,
 
 void ChtP2PCameraAPI::processSystemEvent(const SystemEvent& event)
 {
-    if (!m_initialized) return ;
+    if (!m_initialized.load()) return ;
 
     eZwsystemSubSystemEventType eventType = event.eventType;
     const uint8_t *data = event.data.data();

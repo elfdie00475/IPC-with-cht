@@ -88,8 +88,7 @@ bool ResponseHandler::init(void)
     }
 
     if (m_workers.empty()) {
-        // A handler without every receive context would accept requests that
-        // can never be processed; fail initialization instead.
+        // 至少需要一個 receive context；部分 worker 建立成功仍可服務。
         m_workers.clear();
         nng_close(m_sock);
         m_sock = NNG_SOCKET_INITIALIZER;

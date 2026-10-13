@@ -40,7 +40,8 @@ typedef enum zsipc_msg_id_e
     // for sdchecker reqrep
     eMsgId_SD_GetPartitionList = 0x0101,
     eMsgId_SD_GetPartitionInfo,
-    eMsgId_SD_FormatPartition
+    eMsgId_SD_FormatPartition,
+    eMsgId_SD_CheckPartitionFormatting
 } eZSIpcMsgId;
 
 typedef struct zsipc_message_default_t
@@ -62,22 +63,39 @@ typedef struct zsipc_msg_getPartitionInfo_req_t
     uint32_t u32Idx;
 } tZSIpcMsgGetPartitionInfoReq;
 
+typedef enum zsipc_msg_partition_status_e
+{
+    ePartStatus_Normal = 0,
+    ePartStatus_NewCard,
+    ePartStatus_Damaged,
+    ePartStatus_NoCard,
+    ePartStatus_Formatting,
+    ePartStatus_Other,
+    ePartStatus_Unmount
+} eZSIpcMsgPartStatus;
+
 typedef struct zsipc_msg_getPartitionInfo_rep_t
 {
     int code;
+    char szDeviceName[ZSIPC_NAME_LEN];
     char szPartitionPath[ZSIPC_PATH_LEN];
     char szMountPath[ZSIPC_PATH_LEN];
-    bool bMounted;
-    uint64_t totalSize;
-    uint64_t availSize;
+    uint64_t u64TotalSize;
+    uint64_t u64AvailSize;
+    eZSIpcMsgPartStatus eStatus;
 } tZSIpcMsgGetPartitionInfoRep;
 
-typedef struct zsipc_msg_formatPartition_req_t
-{
-    uint32_t u32Idx;
-} tZSIpcMsgFormatPartitionReq;
+typedef tZSIpcMsgGetPartitionInfoReq tZSIpcMsgFormatPartitionReq;
 
 typedef tZSIpcMsgDefault tZSIpcMsgFormatPartitionRep;
+
+typedef tZSIpcMsgGetPartitionInfoReq tZSIpcMsgCheckFormattingReq;
+
+typedef struct zsipc_msg_checkFormatting_rep_t
+{
+    int code;
+    bool bFormatting;
+} tZSIpcMsgCheckFormattingRep;
 
 #ifdef __cplusplus
 }
