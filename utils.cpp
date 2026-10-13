@@ -43,7 +43,7 @@ void utils_timer_init(tTimer *ptTimer)
 void utils_timer_uninit(tTimer *ptTimer)
 {
     utils_timer_stop(ptTimer);
-    
+
     pthread_mutex_destroy(&ptTimer->mutex);
 }
 
@@ -57,7 +57,7 @@ static void *utils_timer_wait(void *user_data)
     pthread_mutex_unlock(&ptTimer->mutex);
 
     sleep(seconds);
-    
+
     pthread_mutex_lock(&ptTimer->mutex);
     ptTimer->callback(ptTimer->user_data);
     pthread_mutex_unlock(&ptTimer->mutex);
@@ -83,7 +83,7 @@ void utils_timer_stop(tTimer *ptTimer)
     pthread_mutex_lock(&ptTimer->mutex);
     bool existed = ptTimer->existed;
     pthread_mutex_unlock(&ptTimer->mutex);
-    
+
     if (existed)
     {
         pthread_cancel(ptTimer->thread);
@@ -106,11 +106,14 @@ int utils_ensureSingleInstance(const char *lockPath)
         return 0;
     }
 
-    ftruncate(fd, 0);
+    int rc = ftruncate(fd, 0);
+    (void)rc;
+
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
     if (len > 0) {
-        (void)write(fd, buf, (size_t)len);
+        ssize_t w_len = write(fd, buf, (size_t)len);
+        (void)w_len;
     }
 
     return 1;

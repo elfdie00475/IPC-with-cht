@@ -18,7 +18,8 @@ class ResponseHandler
 {
 public:
     static std::shared_ptr<ResponseHandler> create(
-        const char *ipc_name, uint32_t worker_num = 1, OutputCallback cb = nullptr);
+        const char *ipc_name, uint32_t worker_num = 1, 
+        OutputCallback cb = nullptr, void *cb_param = nullptr);
 
 public:
     ~ResponseHandler();
@@ -32,7 +33,8 @@ public:
     bool release(void);
 
 private:
-    ResponseHandler(const char *ipc_name, uint32_t worker_num, OutputCallback cb);
+    ResponseHandler(const char *ipc_name, uint32_t worker_num, 
+        OutputCallback cb, void *cb_param);
 
 private:
     std::mutex m_mutex;
@@ -42,6 +44,7 @@ private:
     bool m_init;
     uint32_t m_workerNum;
     OutputCallback m_outputCB;
+    void *m_outputCBParam;
     std::vector<std::shared_ptr<AioWorker>> m_workers;
 
 }; // class ResponseHandler

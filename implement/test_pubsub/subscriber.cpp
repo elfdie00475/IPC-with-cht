@@ -8,7 +8,7 @@
 
 using namespace llt;
 
-void subscribe_callback(const uint8_t *req_payload, size_t req_len, uint8_t **res_payload, size_t *res_len)
+void subscribe_callback(void *param, const uint8_t *req_payload, size_t req_len, uint8_t **res_payload, size_t *res_len)
 {
     (void) res_payload;
     (void) res_len;

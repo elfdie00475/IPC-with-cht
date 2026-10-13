@@ -12,7 +12,7 @@
 namespace llt {
 namespace nngipc {
 
-typedef void (*OutputCallback) (const uint8_t *, size_t, uint8_t **, size_t *);
+typedef void (*OutputCallback) (void *, const uint8_t *, size_t, uint8_t **, size_t *);
 
 class AioWorker {
 public:
@@ -20,7 +20,8 @@ public:
     enum TYPE { Response, Subscribe };
 
 public:
-    static std::shared_ptr<AioWorker> create(nng_socket sock, TYPE type, OutputCallback cb);
+    static std::shared_ptr<AioWorker> create(nng_socket sock, TYPE type, 
+        OutputCallback cb, void *cb_param);
 
 public:
     ~AioWorker();
@@ -38,7 +39,7 @@ public:
     bool unsubscribe(const std::string& subscribe_str);
 
 private:
-    AioWorker(nng_socket sock, TYPE type, OutputCallback cb);
+    AioWorker(nng_socket sock, TYPE type, OutputCallback cb, void *cb_param);
 
     static void process_wrapper(void *arg);
 
@@ -51,6 +52,7 @@ private:
     nng_aio *m_aio;
     nng_ctx m_ctx;
     OutputCallback m_cb;
+    void *m_cbParam;
     STATE m_state;
     TYPE m_type;
     bool m_stopping;

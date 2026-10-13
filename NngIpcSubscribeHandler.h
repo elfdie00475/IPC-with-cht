@@ -18,7 +18,8 @@ class SubscribeHandler
 {
 public:
     static std::shared_ptr<SubscribeHandler> create(
-        const char *ipc_name, uint32_t worker_num = 1, OutputCallback cb = nullptr);
+        const char *ipc_name, uint32_t worker_num = 1, 
+        OutputCallback cb = nullptr, void *cb_param = nullptr);
 
 public:
     ~SubscribeHandler();
@@ -36,7 +37,8 @@ public:
     bool unsubscribe(const std::string& subscribe_str);
 
 private:
-    SubscribeHandler(const char *ipc_name, uint32_t worker_num, OutputCallback cb);
+    SubscribeHandler(const char *ipc_name, uint32_t worker_num, 
+        OutputCallback cb, void *cb_param);
 
 private:
     std::mutex m_mutex;
@@ -46,6 +48,7 @@ private:
     bool m_init;
     uint32_t m_workerNum;
     OutputCallback m_outputCB;
+    void *m_outputCBParam;
     std::vector<std::shared_ptr<AioWorker>> m_workers;
     uint32_t m_subscribeIdx;
 

@@ -18,16 +18,16 @@ include_directories(${INCLUDE_OUTPUT_PATH})
 
 # 添加可執行文件
 add_executable(test_publisher publisher.cpp)
-target_link_libraries(test_publisher PRIVATE nng_ipc_handler)
+target_link_libraries(test_publisher PRIVATE nngipc_handler)
 
 add_executable(test_subscriber subscriber.cpp)
-target_link_libraries(test_subscriber PRIVATE nng_ipc_handler)
+target_link_libraries(test_subscriber PRIVATE nngipc_handler)
 
 add_executable(test_publisher_forward publisher_forward.cpp)
-target_link_libraries(test_publisher_forward PRIVATE nng_ipc_handler)
+target_link_libraries(test_publisher_forward PRIVATE nngipc_handler)
 
 add_executable(test_subscriber_forward subscriber_forward.cpp)
-target_link_libraries(test_subscriber_forward PRIVATE nng_ipc_handler)
+target_link_libraries(test_subscriber_forward PRIVATE nngipc_handler)
 
 install(TARGETS test_publisher
     ARCHIVE DESTINATION lib

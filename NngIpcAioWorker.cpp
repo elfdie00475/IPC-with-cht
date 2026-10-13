@@ -9,13 +9,14 @@
 
 namespace llt::nngipc {
 
-std::shared_ptr<AioWorker> AioWorker::create(nng_socket sock, TYPE type, OutputCallback cb)
+std::shared_ptr<AioWorker> AioWorker::create(nng_socket sock, TYPE type,
+    OutputCallback cb, void *cb_param)
 {
     if (sock.id == 0) return nullptr;
 
     if (type != TYPE::Response && type != TYPE::Subscribe) return nullptr;
 
-    const auto& worker = std::shared_ptr<AioWorker>(new AioWorker(sock, type, cb));
+    const auto& worker = std::shared_ptr<AioWorker>(new AioWorker(sock, type, cb, cb_param));
     if (!worker) {
         return nullptr;
     }
@@ -27,9 +28,11 @@ std::shared_ptr<AioWorker> AioWorker::create(nng_socket sock, TYPE type, OutputC
     return worker;
 }
 
-AioWorker::AioWorker(nng_socket sock, TYPE type, OutputCallback cb)
+AioWorker::AioWorker(nng_socket sock, TYPE type,
+    OutputCallback cb, void *cb_param)
 : m_sock{sock},
   m_cb{cb},
+  m_cbParam{cb_param},
   m_state{STATE::INIT},
   m_type{type},
   m_stopping{false}
@@ -149,11 +152,10 @@ printf("%s %d state %d\n", __func__, __LINE__, curr_state);
             size_t req_len = nng_msg_len(msg);
             uint8_t *rep_payload = NULL;
             size_t rep_len = 0;
-            bool need_send = false;
 
             if (m_cb) {
                 // pass msg to handle
-                m_cb(req_payload, req_len, &rep_payload, &rep_len);
+                m_cb(m_cbParam, req_payload, req_len, &rep_payload, &rep_len);
             }
 
             nng_msg_clear(msg);

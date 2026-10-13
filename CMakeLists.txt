@@ -11,7 +11,10 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-option(NNGIPC_DIR_PATH "set ipc folder path" "/tmp/nngipc")
+# custom option
+set(NNGIPC_DIR_PATH "/tmp/nngipc" CACHE PATH "set ipc folder path")
+set(PREBUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prebuild" CACHE PATH "set prebuild folder path" )
+option(BUILD_EXAMPLES "build examples" OFF)
 
 if (INCLUDE_OUTPUT_PATH)
 else ()
@@ -20,8 +23,8 @@ endif ()
 
 include_directories(${INCLUDE_OUTPUT_PATH})
 
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/include")
-link_directories("${CMAKE_CURRENT_SOURCE_DIR}/out/lib")
+include_directories("${PREBUILD_DIR}/include")
+link_directories("${PREBUILD_DIR}/lib")
 
 add_library(nngipc_handler SHARED
     NngIpcResponseHandler.cpp
@@ -37,8 +40,10 @@ add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
 target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
 
 add_subdirectory("demo/pubsub_forwarder")
-add_subdirectory("implement/cht_p2pagent")
+if (BUILD_EXAMPLES)
 add_subdirectory("implement/test_pubsub")
+add_subdirectory("implement/zwsystemInterface")
+endif()
 
 install(TARGETS nngipc_handler
     ARCHIVE DESTINATION lib
