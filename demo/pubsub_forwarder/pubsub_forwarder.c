@@ -40,13 +40,27 @@
 #include <nng/protocol/pubsub0/pub.h>
 
 #ifndef NNGIPC_DIR_PATH
-#define NNGIPC_DIR_PATH "/tmp/nngipc"
+#define NNGIPC_DIR_PATH "/tmp/nngipc/"
 #endif
-
-//#define PROXY_FRONT_URL "tcp://localhost:3327"
-//#define PROXY_BACK_URL "tcp://localhost:3328"
-#define PROXY_FRONT_URL "ipc:///tmp/nngipc/pubsub_proxy_front.sock"
-#define PROXY_BACK_URL "ipc:///tmp/nngipc/pubsub_proxy_back.sock"
+// Each use normalizes NNGIPC_DIR_PATH because external builds can override the
+// default configuration without preserving its trailing '/'.
+static int normalize_ipc_directory_path(char *path, size_t path_size)
+{
+    int length = snprintf(path, path_size, "%s", NNGIPC_DIR_PATH);
+    if (length <= 0 || (size_t)length >= path_size) {
+        fprintf(stderr, "Invalid NNGIPC_DIR_PATH\\n");
+        return -1;
+    }
+    if (path[length - 1] != '/') {
+        if ((size_t)length + 1 >= path_size) {
+            fprintf(stderr, "NNGIPC_DIR_PATH is too long\\n");
+            return -1;
+        }
+        path[length++] = '/';
+        path[length] = '\0';
+    }
+    return 0;
+}
 
 bool utils_runCmd(const char *argv[])
 {
@@ -87,7 +101,19 @@ main(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
+	char ipc_dir_path[256];
+	char front_end_url[256];
+	char back_end_url[256];
+	if (normalize_ipc_directory_path(ipc_dir_path, sizeof(ipc_dir_path)) != 0 ||
+	    snprintf(front_end_url, sizeof(front_end_url), "ipc://%spubsub_proxy_front.sock",
+		    ipc_dir_path) >= (int)sizeof(front_end_url) ||
+	    snprintf(back_end_url, sizeof(back_end_url), "ipc://%spubsub_proxy_back.sock",
+		    ipc_dir_path) >= (int)sizeof(back_end_url)) {
+		fprintf(stderr, "Invalid NNG IPC endpoint URL\\n");
+		return EXIT_FAILURE;
+	}
+
+	const char *cmd[] = {"mkdir", "-p", ipc_dir_path, NULL};
 	utils_runCmd(cmd);
 
 	//
@@ -135,12 +161,12 @@ main(int argc, char **argv)
 	nng_listener back_ls  = NNG_LISTENER_INITIALIZER;
 
 	// Create listeners for IPC endpoints
-	printf("Creating front listener with URL: %s\n", PROXY_FRONT_URL);
-	ret = nng_listener_create(&front_ls, sock_front_end, PROXY_FRONT_URL);
+	printf("Creating front listener with URL: %s\n", front_end_url);
+	ret = nng_listener_create(&front_ls, sock_front_end, front_end_url);
 	panic_on_error(ret, "Failed to create front listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	printf("Creating front listener with URL: %s\n", PROXY_BACK_URL);
-	ret = nng_listener_create(&back_ls, sock_back_end, PROXY_BACK_URL);
+	printf("Creating front listener with URL: %s\n", back_end_url);
+	ret = nng_listener_create(&back_ls, sock_back_end, back_end_url);
 	panic_on_error(ret, "Failed to create back listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
 	// Configure IPC socket permissions before starting listeners
@@ -161,12 +187,12 @@ main(int argc, char **argv)
 	ret = nng_listener_start(front_ls, 0);
 	panic_on_error(ret, "Failed to start front listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	printf("Front listener started at %s\n", PROXY_FRONT_URL);
+	printf("Front listener started at %s\n", front_end_url);
 
 	ret = nng_listener_start(back_ls, 0);
 	panic_on_error(ret, "Failed to start back listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	printf("Back listener started at %s\n", PROXY_BACK_URL);
+	printf("Back listener started at %s\n", back_end_url);
 
 	//
 	//  Finally let nng do the forwarding/proxying

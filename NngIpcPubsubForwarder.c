@@ -42,137 +42,155 @@
 #include "NngIpcPubsubDefined.h"
 #include "utils.h"
 
-#define PROXY_FRONT_URL "ipc://" NNGIPC_PUBLISH_NAME
-#define PROXY_BACK_URL "ipc://" NNGIPC_SUBSCRIBE_NAME
+// Each use normalizes NNGIPC_DIR_PATH because external builds can override the
+// generated configuration without preserving its trailing '/'.
+static int normalize_ipc_directory_path(char *path, size_t path_size)
+{
+    int length = snprintf(path, path_size, "%s", NNGIPC_DIR_PATH);
+    if (length <= 0 || (size_t)length >= path_size) {
+        fprintf(stderr, "Invalid NNGIPC_DIR_PATH\\n");
+        return -1;
+    }
+    if (path[length - 1] != '/') {
+        if ((size_t)length + 1 >= path_size) {
+            fprintf(stderr, "NNGIPC_DIR_PATH is too long\\n");
+            return -1;
+        }
+        path[length++] = '/';
+        path[length] = '\0';
+    }
+    return 0;
+}
 
 static void panic_on_error(int should_panic, const char *format, ...)
 {
-	if (should_panic) {
-		va_list args;
-		va_start(args, format);
-		vprintf(format, args);
-		va_end(args);
-		exit(EXIT_FAILURE);
-	}
+    if (should_panic) {
+        va_list args;
+        va_start(args, format);
+        vprintf(format, args);
+        va_end(args);
+        exit(EXIT_FAILURE);
+    }
 }
 
 static void usage(const char* prog)
 {
-	fprintf(stderr, "Usage: %s <frontend_ipc_name> <backend_ipc_name>\n", prog);
+    fprintf(stderr, "Usage: %s <frontend_ipc_name> <backend_ipc_name>\n", prog);
 }
 
 int main(int argc, char **argv)
 {
+    char ipc_dir_path[256];
+    if (normalize_ipc_directory_path(ipc_dir_path, sizeof(ipc_dir_path)) != 0) {
+        return EXIT_FAILURE;
+    }
+
+    const char *cmd[] = {"mkdir", "-p", ipc_dir_path, NULL};
+    utils_runCmd(cmd);
+
+    nng_socket sock_front_end = NNG_SOCKET_INITIALIZER;
+    nng_socket sock_back_end  = NNG_SOCKET_INITIALIZER;
+    int        ret            = 0;
+    int        socket_mode    = 0755; // IPC socket file permissions
+
+    char front_end_url[256];
+    char back_end_url[256];
+    if (snprintf(front_end_url, sizeof(front_end_url), "ipc://%s%s", ipc_dir_path,
+            NNGIPC_PUBLISH_NAME) >= (int)sizeof(front_end_url) ||
+        snprintf(back_end_url, sizeof(back_end_url), "ipc://%s%s", ipc_dir_path,
+            NNGIPC_SUBSCRIBE_NAME) >= (int)sizeof(back_end_url)) {
+        fprintf(stderr, "NNG IPC endpoint URL is too long\\n");
+        return EXIT_FAILURE;
+    }
+    //
+    //  First we need some nng sockets. Not to be confused with network
+    //  sockets
+    //
 #if 0
-    if (argc != 3) {
-        usage(argv[0]);
-        return 2;
+    ret = nng_init(NULL);
+    panic_on_error(ret, "Failed to init library\n");
+#endif
+
+    // Create raw mode sockets for pub/sub forwarding
+    // Raw mode means no protocol-level filtering; all messages are relayed
+    ret = nng_sub0_open_raw(&sock_front_end);
+    panic_on_error(ret, "Failed to open front end socket\n");
+
+    ret = nng_pub0_open_raw(&sock_back_end);
+    panic_on_error(ret, "Failed to open back end socket\n");
+
+#if 0
+    // Configure socket options before creating listeners
+    // This sets the receive buffer size for the front-end socket
+    size_t recv_buf = 1 * 1024 * 1024; // 1MB receive buffer
+    ret = nng_socket_set_size(sock_front_end, NNG_OPT_RECVBUF, recv_buf);
+    if (ret != 0) {
+        fprintf(stderr, "Warning: Failed to set receive buffer: %s\n",
+            nng_strerror(ret));
+    }
+
+    // Set the send buffer size for the back-end socket
+    size_t send_buf = 1 * 1024 * 1024; // 1MB send buffer
+    ret = nng_socket_set_size(sock_back_end, NNG_OPT_SENDBUF, send_buf);
+    if (ret != 0) {
+        fprintf(stderr, "Warning: Failed to set send buffer: %s\n",
+            nng_strerror(ret));
     }
 #endif
 
-	const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
-	utils_runCmd(cmd);
+    //
+    //  Now we need to set up a listener for each socket so that they have
+    //  addresses
+    //
 
-	nng_socket sock_front_end = NNG_SOCKET_INITIALIZER;
-	nng_socket sock_back_end  = NNG_SOCKET_INITIALIZER;
-	int        ret            = 0;
-	int        socket_mode    = 0755; // IPC socket file permissions
+    nng_listener front_ls = NNG_LISTENER_INITIALIZER;
+    nng_listener back_ls  = NNG_LISTENER_INITIALIZER;
 
-	char front_end_url[256];
-	char back_end_url[256];
-	//snprintf(front_end_url, sizeof(front_end_url), "ipc://%s/%s", NNGIPC_DIR_PATH, argv[1]);
-	//snprintf(back_end_url, sizeof(back_end_url), "ipc://%s/%s", NNGIPC_DIR_PATH, argv[2]);
-	snprintf(front_end_url, sizeof(front_end_url), "%s", PROXY_FRONT_URL);
-	snprintf(back_end_url, sizeof(back_end_url), "%s", PROXY_BACK_URL);
-	//
-	//  First we need some nng sockets. Not to be confused with network
-	//  sockets
-	//
-#if 0
-	ret = nng_init(NULL);
-	panic_on_error(ret, "Failed to init library\n");
-#endif
+    // Create listeners for IPC endpoints
+    printf("Creating front listener with URL: %s\n", front_end_url);
+    ret = nng_listener_create(&front_ls, sock_front_end, front_end_url);
+    panic_on_error(ret, "Failed to create front listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	// Create raw mode sockets for pub/sub forwarding
-	// Raw mode means no protocol-level filtering; all messages are relayed
-	ret = nng_sub0_open_raw(&sock_front_end);
-	panic_on_error(ret, "Failed to open front end socket\n");
+    printf("Creating front listener with URL: %s\n", back_end_url);
+    ret = nng_listener_create(&back_ls, sock_back_end, back_end_url);
+    panic_on_error(ret, "Failed to create back listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	ret = nng_pub0_open_raw(&sock_back_end);
-	panic_on_error(ret, "Failed to open back end socket\n");
+    // Configure IPC socket permissions before starting listeners
+    // This makes the sockets accessible by the user
+    ret = nng_listener_set_int(front_ls, NNG_OPT_IPC_PERMISSIONS, socket_mode);
+    if (ret != 0) {
+        fprintf(stderr, "Warning: Failed to set front listener permissions: %s\n",
+            nng_strerror(ret));
+    }
 
-#if 0
-	// Configure socket options before creating listeners
-	// This sets the receive buffer size for the front-end socket
-	size_t recv_buf = 1 * 1024 * 1024; // 1MB receive buffer
-	ret = nng_socket_set_size(sock_front_end, NNG_OPT_RECVBUF, recv_buf);
-	if (ret != 0) {
-		fprintf(stderr, "Warning: Failed to set receive buffer: %s\n",
-		    nng_strerror(ret));
-	}
+    ret = nng_listener_set_int(back_ls, NNG_OPT_IPC_PERMISSIONS, socket_mode);
+    if (ret != 0) {
+        fprintf(stderr, "Warning: Failed to set back listener permissions: %s\n",
+            nng_strerror(ret));
+    }
 
-	// Set the send buffer size for the back-end socket
-	size_t send_buf = 1 * 1024 * 1024; // 1MB send buffer
-	ret = nng_socket_set_size(sock_back_end, NNG_OPT_SENDBUF, send_buf);
-	if (ret != 0) {
-		fprintf(stderr, "Warning: Failed to set send buffer: %s\n",
-		    nng_strerror(ret));
-	}
-#endif
+    // Start the listeners
+    ret = nng_listener_start(front_ls, 0);
+    panic_on_error(ret, "Failed to start front listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	//
-	//  Now we need to set up a listener for each socket so that they have
-	//  addresses
-	//
+    printf("Front listener started at %s\n", front_end_url);
 
-	nng_listener front_ls = NNG_LISTENER_INITIALIZER;
-	nng_listener back_ls  = NNG_LISTENER_INITIALIZER;
+    ret = nng_listener_start(back_ls, 0);
+    panic_on_error(ret, "Failed to start back listener: %s (error code: %d)\n", nng_strerror(ret), ret);
 
-	// Create listeners for IPC endpoints
-	printf("Creating front listener with URL: %s\n", front_end_url);
-	ret = nng_listener_create(&front_ls, sock_front_end, front_end_url);
-	panic_on_error(ret, "Failed to create front listener: %s (error code: %d)\n", nng_strerror(ret), ret);
+    printf("Back listener started at %s\n", back_end_url);
 
-	printf("Creating front listener with URL: %s\n", back_end_url);
-	ret = nng_listener_create(&back_ls, sock_back_end, back_end_url);
-	panic_on_error(ret, "Failed to create back listener: %s (error code: %d)\n", nng_strerror(ret), ret);
+    //
+    //  Finally let nng do the forwarding/proxying
+    //  This blocks and continuously forwards messages between the two sockets
+    //
 
-	// Configure IPC socket permissions before starting listeners
-	// This makes the sockets accessible by the user
-	ret = nng_listener_set_int(front_ls, NNG_OPT_IPC_PERMISSIONS, socket_mode);
-	if (ret != 0) {
-		fprintf(stderr, "Warning: Failed to set front listener permissions: %s\n",
-		    nng_strerror(ret));
-	}
+    printf("Pub/Sub forwarder running. Press Ctrl+C to exit.\n");
+    ret = nng_device(sock_front_end, sock_back_end);
+    panic_on_error(
+        ret, "nng_device returned %d: %s\n", ret, nng_strerror(ret));
 
-	ret = nng_listener_set_int(back_ls, NNG_OPT_IPC_PERMISSIONS, socket_mode);
-	if (ret != 0) {
-		fprintf(stderr, "Warning: Failed to set back listener permissions: %s\n",
-		    nng_strerror(ret));
-	}
-
-	// Start the listeners
-	ret = nng_listener_start(front_ls, 0);
-	panic_on_error(ret, "Failed to start front listener: %s (error code: %d)\n", nng_strerror(ret), ret);
-
-	printf("Front listener started at %s\n", front_end_url);
-
-	ret = nng_listener_start(back_ls, 0);
-	panic_on_error(ret, "Failed to start back listener: %s (error code: %d)\n", nng_strerror(ret), ret);
-
-	printf("Back listener started at %s\n", back_end_url);
-
-	//
-	//  Finally let nng do the forwarding/proxying
-	//  This blocks and continuously forwards messages between the two sockets
-	//
-
-	printf("Pub/Sub forwarder running. Press Ctrl+C to exit.\n");
-	ret = nng_device(sock_front_end, sock_back_end);
-	panic_on_error(
-	    ret, "nng_device returned %d: %s\n", ret, nng_strerror(ret));
-
-	printf("done");
-	nng_fini();
-	return 0;
+    printf("done");
+    nng_fini();
+    return 0;
 }

@@ -12,7 +12,13 @@ set(CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # custom option
-set(NNGIPC_DIR_PATH "/tmp/nngipc" CACHE PATH "set ipc folder path")
+# Keep a single path contract for generated headers and endpoint joins: the
+# directory always ends in '/', while endpoint names never start with one.
+# Use STRING rather than PATH because CMake normalizes PATH values by stripping
+# the trailing '/', which would violate the endpoint-join contract.
+set(NNGIPC_DIR_PATH "/tmp/nngipc/" CACHE STRING "set ipc folder path")
+string(REGEX REPLACE "/+$" "" NNGIPC_DIR_PATH_BASE "${NNGIPC_DIR_PATH}")
+set(NNGIPC_DIR_PATH "${NNGIPC_DIR_PATH_BASE}/" CACHE STRING "set ipc folder path" FORCE)
 set(PREBUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prebuild" CACHE PATH "set prebuild folder path" )
 option(BUILD_EXAMPLES "build examples" OFF)
 option(PUBSUB_USE_FORWARDING "Let Pub/Sub to use proxy to send evnet" OFF)
@@ -60,9 +66,8 @@ add_subdirectory("implement/zwsystemInterface")
 endif ()
 
 if (PUBSUB_USE_FORWARDING)
-set(NNGIPC_DIR_PATH "/tmp/nngipc")
-set(NNGIPC_PUBLISH_NAME "/tmp/nngipc/pubsub_proxy_front.sock")
-set(NNGIPC_SUBSCRIBE_NAME "/tmp/nngipc/pubsub_proxy_back.sock")
+set(NNGIPC_PUBLISH_NAME "pubsub_proxy_front.sock")
+set(NNGIPC_SUBSCRIBE_NAME "pubsub_proxy_back.sock")
 set(NNGIPC_PROXY_MODE 1)
 
 set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
@@ -76,9 +81,8 @@ install(TARGETS nngipc_pubsub_forwarder
     RUNTIME DESTINATION bin
 )
 else()
-set(NNGIPC_DIR_PATH "/tmp/nngipc")
-set(NNGIPC_PUBLISH_NAME "/tmp/nngipc/zwsystem_pubsub.ipc")
-set(NNGIPC_SUBSCRIBE_NAME "/tmp/nngipc/zwsystem_pubsub.ipc")
+set(NNGIPC_PUBLISH_NAME "zwsystem_pubsub.ipc")
+set(NNGIPC_SUBSCRIBE_NAME "zwsystem_pubsub.ipc")
 set(NNGIPC_PROXY_MODE 0)
 
 set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
@@ -90,13 +94,14 @@ set(OUTPUT_COLLECTION_HEADER
 )
 set(OUTPUT_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcAioWorker.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcPath.h
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcPublishHandler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcRequestHandler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcResponseHandler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcSubscribeHandler.h
 
     ${NNGIPC_PUBSUB_DEFINED_HEADER}
-    
+
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcCommonTypes.h
 )
 
@@ -108,6 +113,7 @@ file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}")
 file(MAKE_DIRECTORY "${INCLUDE_OUTPUT_PATH}/nngipc")
 configure_file(nngipc.h ${INCLUDE_OUTPUT_PATH}/nngipc.h COPYONLY)
 configure_file(NngIpcAioWorker.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcAioWorker.h COPYONLY)
+configure_file(NngIpcPath.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcPath.h COPYONLY)
 configure_file(NngIpcPublishHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcPublishHandler.h COPYONLY)
 configure_file(NngIpcRequestHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcRequestHandler.h COPYONLY)
 configure_file(NngIpcResponseHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcResponseHandler.h COPYONLY)
@@ -128,6 +134,7 @@ file(MAKE_DIRECTORY "${_staging_includedir}")
 file(MAKE_DIRECTORY "${_staging_includedir}/nngipc")
 configure_file(nngipc.h ${_staging_includedir}/nngipc.h COPYONLY)
 configure_file(NngIpcAioWorker.h ${_staging_includedir}/nngipc/NngIpcAioWorker.h COPYONLY)
+configure_file(NngIpcPath.h ${_staging_includedir}/nngipc/NngIpcPath.h COPYONLY)
 configure_file(NngIpcPublishHandler.h ${_staging_includedir}/nngipc/NngIpcPublishHandler.h COPYONLY)
 configure_file(NngIpcRequestHandler.h ${_staging_includedir}/nngipc/NngIpcRequestHandler.h COPYONLY)
 configure_file(NngIpcResponseHandler.h ${_staging_includedir}/nngipc/NngIpcResponseHandler.h COPYONLY)

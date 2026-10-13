@@ -4,10 +4,11 @@
 #include <string>
 
 #include "NngIpcResponseHandler.h"
+#include "NngIpcPath.h"
 #include "utils.h"
 
 #ifndef NNGIPC_DIR_PATH
-#define NNGIPC_DIR_PATH "/tmp/nngipc"
+#define NNGIPC_DIR_PATH "/tmp/nngipc/"
 #endif
 
 namespace llt {
@@ -60,8 +61,14 @@ ResponseHandler::~ResponseHandler()
 
 bool ResponseHandler::init(void)
 {
+    std::string ipcDirPath;
+    if (!normalizeIpcDirectoryPath(NNGIPC_DIR_PATH, &ipcDirPath)) {
+        fprintf(stderr, "NNGIPC_DIR_PATH must not be empty\n");
+        return false;
+    }
+
     // create ipc folder
-    const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
+    const char *cmd[] = {"mkdir", "-p", ipcDirPath.c_str(), NULL};
     utils_runCmd(cmd);
 
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -99,7 +106,13 @@ bool ResponseHandler::start(void)
 
     if (!m_init) return false;
 
-    std::string url = std::string("ipc://") + std::string(NNGIPC_DIR_PATH) + "/" + m_ipcName;
+    // start() is a separate use site, so normalize again before URL creation.
+    std::string ipcDirPath;
+    if (!normalizeIpcDirectoryPath(NNGIPC_DIR_PATH, &ipcDirPath)) {
+        fprintf(stderr, "NNGIPC_DIR_PATH must not be empty\n");
+        return false;
+    }
+    std::string url = std::string("ipc://") + ipcDirPath + m_ipcName;
     int rv = 0;
     if ((rv = nng_listen(m_sock, url.c_str(), NULL, 0)) != 0) {
         fprintf(stderr, "%s: %s url %s\n", "nng_listen", nng_strerror(rv), url.c_str());
