@@ -15,7 +15,8 @@ namespace nngipc {
 class RequestHandler
 {
 public:
-    static std::shared_ptr<RequestHandler> create(const char *ipc_name);
+    static std::shared_ptr<RequestHandler> create(const char *ipc_name,
+                                                  int timeout_ms = -1);
 
 public:
     ~RequestHandler();
@@ -31,12 +32,13 @@ public:
     bool recv(uint8_t **payload, size_t *payload_len);
 
 private:
-    RequestHandler(const char *ipc_name);
+    RequestHandler(const char *ipc_name, int timeout_ms);
 
 private:
     std::mutex m_mutex;
 
     const std::string m_ipcName;
+    const int m_timeoutMs;
     nng_socket m_sock;
     nng_msg *m_msg;
     bool m_init;

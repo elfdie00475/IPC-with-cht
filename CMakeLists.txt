@@ -64,6 +64,9 @@ add_library(nngipc_handler SHARED
     utils.cpp
 )
 target_link_libraries(nngipc_handler nng)
+target_include_directories(nngipc_handler PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${INCLUDE_OUTPUT_PATH}")
 
 install(TARGETS nngipc_handler
     ARCHIVE DESTINATION lib
@@ -102,8 +105,6 @@ set(OUTPUT_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcSubscribeHandler.h
 
     ${NNGIPC_PUBSUB_DEFINED_HEADER}
-
-    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcCommonTypes.h
 )
 
 install(FILES ${OUTPUT_COLLECTION_HEADER} DESTINATION include)
@@ -121,36 +122,4 @@ configure_file(NngIpcResponseHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcRespo
 configure_file(NngIpcSubscribeHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcSubscribeHandler.h COPYONLY)
 
 configure_file(${NNGIPC_PUBSUB_DEFINED_HEADER} ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcPubsubDefined.h COPYONLY)
-
-configure_file(NngIpcCommonTypes.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcCommonTypes.h COPYONLY)
-endif ()
-
-# for 99_PKGS to reference
-if (BRSTAGING_ROOT)
-set(_staging_includedir "${BRSTAGING_ROOT}/usr/include")
-set(_staging_libdir "${BRSTAGING_ROOT}/usr/lib")
-
-# 1) copy include file
-file(MAKE_DIRECTORY "${_staging_includedir}")
-file(MAKE_DIRECTORY "${_staging_includedir}/nngipc")
-configure_file(nngipc.h ${_staging_includedir}/nngipc.h COPYONLY)
-configure_file(NngIpcAioWorker.h ${_staging_includedir}/nngipc/NngIpcAioWorker.h COPYONLY)
-configure_file(NngIpcPath.h ${_staging_includedir}/nngipc/NngIpcPath.h COPYONLY)
-configure_file(NngIpcPublishHandler.h ${_staging_includedir}/nngipc/NngIpcPublishHandler.h COPYONLY)
-configure_file(NngIpcRequestHandler.h ${_staging_includedir}/nngipc/NngIpcRequestHandler.h COPYONLY)
-configure_file(NngIpcResponseHandler.h ${_staging_includedir}/nngipc/NngIpcResponseHandler.h COPYONLY)
-configure_file(NngIpcSubscribeHandler.h ${_staging_includedir}/nngipc/NngIpcSubscribeHandler.h COPYONLY)
-configure_file(${NNGIPC_PUBSUB_DEFINED_HEADER} ${_staging_includedir}/nngipc/NngIpcPubsubDefined.h COPYONLY)
-configure_file(NngIpcCommonTypes.h ${_staging_includedir}/nngipc/NngIpcCommonTypes.h COPYONLY)
-
-# 2) copy library file
-file(MAKE_DIRECTORY "${_staging_libdir}")
-add_custom_command(TARGET nngipc_handler POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "$<TARGET_FILE:nngipc_handler>"
-          "${_staging_libdir}/$<TARGET_FILE_NAME:nngipc_handler>"
-
-  VERBATIM
-)
-
 endif ()

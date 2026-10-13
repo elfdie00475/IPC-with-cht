@@ -14,13 +14,15 @@
 namespace llt {
 namespace nngipc {
 
-std::shared_ptr<RequestHandler> RequestHandler::create(const char *ipc_name)
+std::shared_ptr<RequestHandler> RequestHandler::create(
+        const char *ipc_name, int timeout_ms)
 {
     if (!ipc_name || strlen(ipc_name) == 0) {
         return nullptr;
     }
 
-    const auto& handler = std::shared_ptr<RequestHandler>(new RequestHandler(ipc_name));
+    const auto& handler = std::shared_ptr<RequestHandler>(
+        new RequestHandler(ipc_name, timeout_ms));
     if (!handler) {
         return nullptr;
     }
@@ -32,8 +34,9 @@ std::shared_ptr<RequestHandler> RequestHandler::create(const char *ipc_name)
     return handler;
 }
 
-RequestHandler::RequestHandler(const char *ipc_name)
+RequestHandler::RequestHandler(const char *ipc_name, int timeout_ms)
 : m_ipcName{std::string(ipc_name)},
+  m_timeoutMs{timeout_ms},
   m_msg{NULL},
   m_init{false}
 {
@@ -63,6 +66,15 @@ bool RequestHandler::init(void)
     int rv = 0;
     if ((rv = nng_req0_open(&m_sock)) != 0) {
         fprintf(stderr, "%s: %s\n", "nng_req0_open", nng_strerror(rv));
+        return false;
+    }
+
+    if (m_timeoutMs > 0 &&
+        ((rv = nng_socket_set_ms(m_sock, NNG_OPT_SENDTIMEO, m_timeoutMs)) != 0 ||
+         (rv = nng_socket_set_ms(m_sock, NNG_OPT_RECVTIMEO, m_timeoutMs)) != 0)) {
+        fprintf(stderr, "%s: %s\n", "nng_socket_set_ms", nng_strerror(rv));
+        nng_close(m_sock);
+        m_sock = NNG_SOCKET_INITIALIZER;
         return false;
     }
 
