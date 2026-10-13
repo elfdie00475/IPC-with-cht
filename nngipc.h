@@ -6,5 +6,6 @@
 #include <nngipc/NngIpcRequestHandler.h>
 #include <nngipc/NngIpcResponseHandler.h>
 #include <nngipc/NngIpcSubscribeHandler.h>
+#include <nngipc/NngIpcPubsubDefined.h>
 
 #endif /* LLT_NNGIPC_NNGIPC_H */

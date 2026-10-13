@@ -39,16 +39,11 @@
 #include <nng/protocol/pubsub0/sub.h>
 #include <nng/protocol/pubsub0/pub.h>
 
+#include "NngIpcPubsubDefined.h"
 #include "utils.h"
 
-#ifndef NNGIPC_DIR_PATH
-#define NNGIPC_DIR_PATH "/tmp/nngipc"
-#endif
-
-//#define PROXY_FRONT_URL "tcp://localhost:3327"
-//#define PROXY_BACK_URL "tcp://localhost:3328"
-#define PROXY_FRONT_URL "ipc:///tmp/nngipc/pubsub_proxy_front.sock"
-#define PROXY_BACK_URL "ipc:///tmp/nngipc/pubsub_proxy_back.sock"
+#define PROXY_FRONT_URL "ipc://" NNGIPC_PUBLISH_NAME
+#define PROXY_BACK_URL "ipc://" NNGIPC_SUBSCRIBE_NAME
 
 static void panic_on_error(int should_panic, const char *format, ...)
 {
@@ -68,10 +63,12 @@ static void usage(const char* prog)
 
 int main(int argc, char **argv)
 {
+#if 0
     if (argc != 3) {
         usage(argv[0]);
         return 2;
     }
+#endif
 
 	const char *cmd[] = {"mkdir", "-p", NNGIPC_DIR_PATH, NULL};
 	utils_runCmd(cmd);
@@ -83,8 +80,10 @@ int main(int argc, char **argv)
 
 	char front_end_url[256];
 	char back_end_url[256];
-	snprintf(front_end_url, sizeof(front_end_url), "ipc://%s/%s", NNGIPC_DIR_PATH, argv[1]);
-	snprintf(back_end_url, sizeof(back_end_url), "ipc://%s/%s", NNGIPC_DIR_PATH, argv[2]);
+	//snprintf(front_end_url, sizeof(front_end_url), "ipc://%s/%s", NNGIPC_DIR_PATH, argv[1]);
+	//snprintf(back_end_url, sizeof(back_end_url), "ipc://%s/%s", NNGIPC_DIR_PATH, argv[2]);
+	snprintf(front_end_url, sizeof(front_end_url), "%s", PROXY_FRONT_URL);
+	snprintf(back_end_url, sizeof(back_end_url), "%s", PROXY_BACK_URL);
 	//
 	//  First we need some nng sockets. Not to be confused with network
 	//  sockets

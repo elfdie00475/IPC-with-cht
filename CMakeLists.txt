@@ -4,7 +4,7 @@ project(NNG-IPC)
 option(BUILD_TEST "In test compile." OFF)
 
 # 設置 C++ 標準
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -15,7 +15,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(NNGIPC_DIR_PATH "/tmp/nngipc" CACHE PATH "set ipc folder path")
 set(PREBUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/prebuild" CACHE PATH "set prebuild folder path" )
 option(BUILD_EXAMPLES "build examples" OFF)
-option(USE_FORWARDING "Let Pub/Sub to use proxy to send evnet" OFF)
+option(PUBSUB_USE_FORWARDING "Let Pub/Sub to use proxy to send evnet" OFF)
 
 if (INCLUDE_OUTPUT_PATH)
 else ()
@@ -41,36 +41,8 @@ add_library(nngipc_handler SHARED
     NngIpcSubscribeHandler.cpp
     NngIpcAioWorker.cpp
     utils.cpp
-
-    # wrapper for c code
-    NngIpcPublishHandler_C.cpp
-    NngIpcRequestHandler_C.cpp
-    NngIpcResponseHandler_C.cpp
-    NngIpcSubscribeHandler_C.cpp
 )
 target_link_libraries(nngipc_handler nng)
-# Keep installed headers consumable by C++11 callers while allowing the
-# handler implementation to use C++17 internally.
-target_compile_features(nngipc_handler PRIVATE cxx_std_17)
-
-if (BUILD_EXAMPLES)
-add_subdirectory("demo/pubsub_forwarder")
-add_subdirectory("implement/test_pubsub")
-add_subdirectory("implement/zwsystemInterface")
-endif ()
-
-# create common ipc system
-add_subdirectory("implement/zwipcsystem")
-
-if (USE_FORWARDING)
-add_definitions(-DPUBSUB_USE_FORWARDING=1)
-add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
-target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
-
-install(TARGETS nngipc_pubsub_forwarder
-    RUNTIME DESTINATION bin
-)
-endif ()
 
 install(TARGETS nngipc_handler
     ARCHIVE DESTINATION lib
@@ -79,9 +51,42 @@ install(TARGETS nngipc_handler
     INCLUDES DESTINATION include
 )
 
+if (BUILD_EXAMPLES)
+add_subdirectory("demo/pubsub_forwarder")
+endif ()
+
+if (BUILD_TEST)
+add_subdirectory("implement/zwsystemInterface")
+endif ()
+
+if (PUBSUB_USE_FORWARDING)
+set(NNGIPC_DIR_PATH "/tmp/nngipc")
+set(NNGIPC_PUBLISH_NAME "/tmp/nngipc/pubsub_proxy_front.sock")
+set(NNGIPC_SUBSCRIBE_NAME "/tmp/nngipc/pubsub_proxy_back.sock")
+set(NNGIPC_PROXY_MODE 1)
+
+set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
+configure_file(NngIpcPubsubDefined.h.in "${NNGIPC_PUBSUB_DEFINED_HEADER}" @ONLY)
+
+# forwarding tool
+add_executable(nngipc_pubsub_forwarder NngIpcPubsubForwarder.c)
+target_link_libraries(nngipc_pubsub_forwarder nngipc_handler)
+
+install(TARGETS nngipc_pubsub_forwarder
+    RUNTIME DESTINATION bin
+)
+else()
+set(NNGIPC_DIR_PATH "/tmp/nngipc")
+set(NNGIPC_PUBLISH_NAME "/tmp/nngipc/zwsystem_pubsub.ipc")
+set(NNGIPC_SUBSCRIBE_NAME "/tmp/nngipc/zwsystem_pubsub.ipc")
+set(NNGIPC_PROXY_MODE 0)
+
+set(NNGIPC_PUBSUB_DEFINED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/NngIpcPubsubDefined.h")
+configure_file(NngIpcPubsubDefined.h.in "${NNGIPC_PUBSUB_DEFINED_HEADER}" @ONLY)
+endif()
+
 set(OUTPUT_COLLECTION_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/nngipc.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/nngipc_C.h
 )
 set(OUTPUT_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcAioWorker.h
@@ -90,10 +95,9 @@ set(OUTPUT_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcResponseHandler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcSubscribeHandler.h
 
-    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcPublishHandler_C.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcRequestHandler_C.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcResponseHandler_C.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcSubscribeHandler_C.h
+    ${NNGIPC_PUBSUB_DEFINED_HEADER}
+    
+    ${CMAKE_CURRENT_SOURCE_DIR}/NngIpcCommonTypes.h
 )
 
 install(FILES ${OUTPUT_COLLECTION_HEADER} DESTINATION include)
@@ -109,11 +113,9 @@ configure_file(NngIpcRequestHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcReques
 configure_file(NngIpcResponseHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcResponseHandler.h COPYONLY)
 configure_file(NngIpcSubscribeHandler.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcSubscribeHandler.h COPYONLY)
 
-configure_file(nngipc_C.h ${INCLUDE_OUTPUT_PATH}/nngipc_C.h COPYONLY)
-configure_file(NngIpcPublishHandler_C.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcPublishHandler_C.h COPYONLY)
-configure_file(NngIpcRequestHandler_C.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcRequestHandler_C.h COPYONLY)
-configure_file(NngIpcResponseHandler_C.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcResponseHandler_C.h COPYONLY)
-configure_file(NngIpcSubscribeHandler_C.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcSubscribeHandler_C.h COPYONLY)
+configure_file(${NNGIPC_PUBSUB_DEFINED_HEADER} ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcPubsubDefined.h COPYONLY)
+
+configure_file(NngIpcCommonTypes.h ${INCLUDE_OUTPUT_PATH}/nngipc/NngIpcCommonTypes.h COPYONLY)
 endif ()
 
 # for 99_PKGS to reference
@@ -130,12 +132,8 @@ configure_file(NngIpcPublishHandler.h ${_staging_includedir}/nngipc/NngIpcPublis
 configure_file(NngIpcRequestHandler.h ${_staging_includedir}/nngipc/NngIpcRequestHandler.h COPYONLY)
 configure_file(NngIpcResponseHandler.h ${_staging_includedir}/nngipc/NngIpcResponseHandler.h COPYONLY)
 configure_file(NngIpcSubscribeHandler.h ${_staging_includedir}/nngipc/NngIpcSubscribeHandler.h COPYONLY)
-
-configure_file(nngipc_C.h ${_staging_includedir}/nngipc_C.h COPYONLY)
-configure_file(NngIpcPublishHandler_C.h ${_staging_includedir}/nngipc/NngIpcPublishHandler_C.h COPYONLY)
-configure_file(NngIpcRequestHandler_C.h ${_staging_includedir}/nngipc/NngIpcRequestHandler_C.h COPYONLY)
-configure_file(NngIpcResponseHandler_C.h ${_staging_includedir}/nngipc/NngIpcResponseHandler_C.h COPYONLY)
-configure_file(NngIpcSubscribeHandler_C.h ${_staging_includedir}/nngipc/NngIpcSubscribeHandler_C.h COPYONLY)
+configure_file(${NNGIPC_PUBSUB_DEFINED_HEADER} ${_staging_includedir}/nngipc/NngIpcPubsubDefined.h COPYONLY)
+configure_file(NngIpcCommonTypes.h ${_staging_includedir}/nngipc/NngIpcCommonTypes.h COPYONLY)
 
 # 2) copy library file
 file(MAKE_DIRECTORY "${_staging_libdir}")

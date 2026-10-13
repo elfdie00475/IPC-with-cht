@@ -80,7 +80,7 @@ bool ResponseHandler::init(void)
         if (worker) m_workers.push_back(worker);
     }
 
-    if (m_workers.size() != m_workerNum) {
+    if (m_workers.empty()) {
         // A handler without every receive context would accept requests that
         // can never be processed; fail initialization instead.
         m_workers.clear();
