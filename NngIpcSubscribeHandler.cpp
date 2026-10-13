@@ -141,6 +141,11 @@ bool SubscribeHandler::unsubscribe(const std::string& subscribe_str)
 
 bool SubscribeHandler::start(void)
 {
+    return start(false);
+}
+
+bool SubscribeHandler::start(bool asynchronousDial)
+{
     std::lock_guard<std::mutex> lock(m_mutex);
 
     if (!m_init) return false;
@@ -153,7 +158,7 @@ bool SubscribeHandler::start(void)
     }
     std::string url = std::string("ipc://") + ipcDirPath + m_ipcName;
     int rv = 0;
-    if ((rv = nng_dial(m_sock, url.c_str(), NULL, 0)) != 0) {
+    if ((rv = nng_dial(m_sock, url.c_str(), NULL, asynchronousDial ? NNG_FLAG_NONBLOCK : 0)) != 0) {
         fprintf(stderr, "%s: %s url %s\n", "nng_dial", nng_strerror(rv), url.c_str());
         return false;
     }

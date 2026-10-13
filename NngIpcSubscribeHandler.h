@@ -27,6 +27,8 @@ public:
     bool init(void);
 
     bool start(void);
+    // Optional producers may start later; retain the original start() symbol.
+    bool start(bool asynchronousDial);
 
     bool stop(void);
 
